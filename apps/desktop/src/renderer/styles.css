@@ -2508,7 +2508,8 @@ button:active {
   display: grid;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  /* PR-UI-LAYOUT-9: card radius family alignment (8 → 10). */
+  border-radius: 10px;
   background: var(--background);
   white-space: normal;
 }
@@ -2578,7 +2579,8 @@ button:active {
   display: grid;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  /* PR-UI-LAYOUT-9: card radius family alignment (8 → 10). */
+  border-radius: 10px;
   background: var(--background);
   white-space: normal;
 }
