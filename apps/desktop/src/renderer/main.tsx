@@ -14,6 +14,7 @@ import type {
   UiDensity,
 } from '@maka/core';
 import {
+  applyToolOutputChunk,
   type ChatHeaderAlert,
   ChatView,
   Composer,
@@ -1013,23 +1014,6 @@ function AppShell() {
   }
 
   /**
-   * PR-UI-12 — append a streamed chunk to a tool's output buffer.
-   *
-   * Invariants enforced here, not relied on from the event source:
-   *  - Dedup by `seq` (per-toolCallId monotonic from runtime). If a
-   *    seq already exists, we drop the incoming chunk — important on
-   *    sessionEvents replays or main-process reconnects.
-   *  - Sorted insert by `seq`. The runtime emits in-order, but
-   *    `tool_result` racing against the last delta could land here
-   *    after a flush, and renderer reconnect could deliver fragments
-   *    out of order. Always keep the array sorted so React renders
-   *    stable visual order.
-   *  - If the tool doesn't exist yet in `liveToolsBySession`, we
-   *    create a minimal `pending` entry. This covers the rare race
-   *    where `tool_output_delta` arrives before `tool_start` is
-   *    flushed to the renderer; we'd rather show output than drop it.
-   */
-  /**
    * PR-UI-12 fixup (@xuan post-signoff cleanup): shared helper for the
    * abort + error event paths. A turn-ending event leaves any tool
    * that was `pending` / `running` / `waiting_permission` orphaned
@@ -1062,6 +1046,37 @@ function AppShell() {
     });
   }
 
+  /**
+   * PR-UI-12 — append a streamed chunk to a tool's output buffer.
+   *
+   * Invariants enforced here, not relied on from the event source:
+   *  - Dedup by `seq` (per-toolCallId monotonic from runtime). If a
+   *    seq already exists, we drop the incoming chunk — important on
+   *    sessionEvents replays or main-process reconnects.
+   *  - Sorted insert by `seq`. The runtime emits in-order, but
+   *    `tool_result` racing against the last delta could land here
+   *    after a flush, and renderer reconnect could deliver fragments
+   *    out of order. Always keep the array sorted so React renders
+   *    stable visual order.
+   *  - **Secondary redaction** (PR-UI-12 fixup #2, @kenji A3 msg
+   *    365ff8b9): chunk text runs through `redactSecrets` BEFORE
+   *    landing in React state. The renderer does not trust upstream
+   *    redaction alone — raw secrets must not reach state /
+   *    DevTools / clipboard / future serialization paths.
+   *  - **Per-chunk + per-tool caps** (same fixup): single oversize
+   *    chunk is tail-truncated; per-tool count + total-char caps
+   *    drop oldest chunks. Defense in depth against a runaway tool
+   *    flooding the renderer.
+   *  - If the tool doesn't exist yet in `liveToolsBySession`, we
+   *    create a minimal `pending` entry. This covers the rare race
+   *    where `tool_output_delta` arrives before `tool_start` is
+   *    flushed to the renderer; we'd rather show output than drop it.
+   *
+   * All of the above lives in the pure helper `applyToolOutputChunk`
+   * (`@maka/ui/tool-output-stream`) so the redaction + cap logic is
+   * unit-tested without a renderer. This function is just the React
+   * state plumbing around it.
+   */
   function appendToolOutputChunk(sessionId: string, toolUseId: string, chunk: ToolOutputChunk) {
     setLiveToolsBySession((current) => {
       const list = current[sessionId] ?? [];
@@ -1070,16 +1085,31 @@ function AppShell() {
         index >= 0
           ? list[index]!
           : { toolUseId, toolName: 'Tool', status: 'running', args: undefined };
-      const prevChunks = base.outputChunks ?? [];
-      // Dedup: drop if seq already present.
-      if (prevChunks.some((existing) => existing.seq === chunk.seq)) {
+      // PR-UI-12 review fixup #2 (@kenji A3 msg 365ff8b9):
+      // `applyToolOutputChunk` is the single chokepoint for
+      // - dedupe-by-seq
+      // - sorted insertion
+      // - SECONDARY REDACTION via `redactSecrets` (never trust the
+      //   upstream redactor alone; raw text must not enter React state)
+      // - per-chunk size cap (tail-keep + truncation marker)
+      // - per-tool count + total-char caps (drop oldest)
+      // The pure helper lives in `@maka/ui/tool-output-stream` so the
+      // logic is testable without a renderer.
+      const applied = applyToolOutputChunk(base.outputChunks, chunk);
+      // Dedupe short-circuit: helper returned the same `chunks` array
+      // reference, meaning the seq was already present. Skip the
+      // re-render entirely if the tool item already exists; the only
+      // observable change would be re-asserting `outputTruncated`,
+      // which is monotonic so no-op.
+      if (index >= 0 && applied.chunks === (base.outputChunks ?? [])) {
         return current;
       }
-      // Sorted insert by seq.
-      const nextChunks = [...prevChunks, chunk].sort((a, b) => a.seq - b.seq);
       const nextItem: ToolActivityItem = {
         ...base,
-        outputChunks: nextChunks,
+        outputChunks: applied.chunks,
+        // Once `truncated` flips true we stick — a later non-truncated
+        // chunk shouldn't make the UI claim the stream is now complete.
+        outputTruncated: base.outputTruncated || applied.truncated,
         // Promote `pending` → `running` once we see live output, so the
         // status dot doesn't lie about activity.
         status: base.status === 'pending' ? 'running' : base.status,

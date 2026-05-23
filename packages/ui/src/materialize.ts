@@ -42,8 +42,21 @@ export interface ToolActivityItem {
    *  - keep the list sorted by `seq` (insert-sort on out-of-order)
    *  - render in two visual streams (stdout / stderr) but preserve
    *    the global seq order so interleaving reads correctly.
+   *
+   * PR-UI-12 review fixup #2 (@kenji A3 msg 365ff8b9): the renderer
+   * also runs each incoming chunk through `redactSecrets` and a
+   * size cap before appending — see `applyToolOutputChunk` in
+   * `tool-output-stream.ts`. Defense in depth against runtime
+   * tail-redactor misses.
    */
   outputChunks?: ToolOutputChunk[];
+  /**
+   * `true` when `applyToolOutputChunk` dropped/truncated content
+   * (per-chunk size cap, per-tool count cap, or per-tool total-char
+   * cap fired). UI surfaces this as a "已截断" pill so users know
+   * the visible stream is not the full underlying output.
+   */
+  outputTruncated?: boolean;
 }
 
 // system_note kinds that we surface inline to the user. Everything else
