@@ -25,11 +25,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { ArtifactBinaryReadResult, ArtifactRecord } from '@maka/core';
+import type { ArtifactRecord } from '@maka/core';
 import {
   type ArtifactPreviewInput,
   type PreviewResolution,
-  decideImagePostLoad,
+  decideImageReadOutcome,
   formatPreviewSize,
   resolvePreviewKind,
 } from '@maka/ui/artifact-preview-registry';
@@ -87,6 +87,15 @@ function describeUnsupportedReason(
       return {
         title: '文件过大，暂不预览',
         description: '为避免在内存中加载大体积图片，超过 2 MB 的 artifact 不在此处展开预览。',
+      };
+    case 'read_failed':
+      // PR-UI-RENDER-3a fixup (@kenji review @msg 5fa6f6a5) — distinct
+      // copy for IPC / read failures. v1 collapsed this into
+      // `kind_disallowed` which told the user "format unsupported"
+      // when the real cause was a missing / unreadable file.
+      return {
+        title: '加载预览失败',
+        description: '无法读取 artifact 内容（可能已被删除、移动或权限不足）。请通过工具栏「在 Finder 中打开」检查文件。',
       };
     default: {
       const _exhaustive: never = reason;
@@ -148,13 +157,23 @@ export function UnsupportedArtifactPreview(props: {
  * length cap before any decode, and renders inside a bounded
  * container with `object-fit: contain` so an unexpectedly large
  * intrinsic size can't break the chat / pane layout.
+ *
+ * Critical invariant (@kenji review @msg 5fa6f6a5):
+ *   - The post-load L2 decision (`decideImageReadOutcome`) runs
+ *     INSIDE the async, BEFORE `setState`. The hook's state union
+ *     therefore holds either a `loading` placeholder, an `image`
+ *     branch carrying the verified base64, OR an `unsupported`
+ *     branch that carries NO base64. A 10MB oversize payload never
+ *     enters React state / DevTools snapshot.
+ *   - The component below is intentionally a thin switch over the
+ *     hook state — it never sees the raw `ArtifactBinaryReadResult`.
  */
 function ImageArtifactPreview(props: {
   record: ArtifactRecord;
   input: ArtifactPreviewInput;
   onShowInFolder?: () => void;
 }) {
-  const result = useBinaryRead(props.record.id);
+  const result = useImagePreviewLoad(props.record.id);
   if (result.state === 'loading') {
     return (
       <div className="maka-artifact-preview-loading" role="status" aria-live="polite">
@@ -163,47 +182,21 @@ function ImageArtifactPreview(props: {
       </div>
     );
   }
-  if (!result.value.ok) {
-    // Read failed — pass through to Unsupported with the closest
-    // matching reason. `read_failed` / `not_found` / `not_allowed`
-    // collapse to `kind_disallowed` here because they're not
-    // really registry classification failures, they're IPC
-    // failures. We don't add a separate reason for them in this
-    // PR; future PR can add `load_failed` if needed.
+  if (result.state === 'unsupported') {
     return (
       <UnsupportedArtifactPreview
         input={props.input}
-        reason="kind_disallowed"
+        reason={result.reason}
         onShowInFolder={props.onShowInFolder}
       />
     );
   }
-  // L2 post-load decision — pure helper combines the base64 cap
-  // and the MIME re-validation. The MIME we trust for the final
-  // `<img src="data:<mime>;base64,...">` is the one main sniffed,
-  // re-validated against the SAME allowlist the L1 resolver used.
-  // The metadata MIME (which the L1 resolver consulted) is
-  // user-controllable; under no circumstances do we let it drive
-  // the rendered DOM attribute. @kenji review @msg c9eb3b6f / @msg
-  // f1ef0cc5.
-  const outcome = decideImagePostLoad({
-    base64: result.value.base64,
-    mimeType: result.value.mimeType,
-  });
-  if (outcome.kind === 'unsupported') {
-    return (
-      <UnsupportedArtifactPreview
-        input={props.input}
-        reason={outcome.reason}
-        onShowInFolder={props.onShowInFolder}
-      />
-    );
-  }
+  // result.state === 'image' — exhaustiveness check below.
   return (
     <div className="maka-artifact-preview-image">
       <img
         alt={props.record.name}
-        src={`data:${outcome.safeMime};base64,${outcome.base64}`}
+        src={`data:${result.safeMime};base64,${result.base64}`}
       />
     </div>
   );
@@ -218,26 +211,57 @@ function toPreviewInput(record: ArtifactRecord): ArtifactPreviewInput {
   };
 }
 
-type BinaryReadState =
+/**
+ * Hook state for the image preview load. Closed union — the
+ * `unsupported` branch DELIBERATELY does NOT carry `base64`.
+ *
+ * @kenji review @msg 5fa6f6a5: the v1 of this hook held a raw
+ * `ArtifactBinaryReadResult` (which carries base64 in its `ok: true`
+ * branch). That meant a 10MB oversize payload could land in React
+ * state / DevTools before the L2 cap rejected it for rendering. The
+ * fix replaces the broad union with this closed three-way one and
+ * runs the L2 decision INSIDE the async, so the only `base64` that
+ * ever reaches `setState` is one that has already passed
+ * `decideImageReadOutcome` (cap + MIME re-validation).
+ *
+ * Source/test gate (locked by `artifact-preview-registry.test.ts`):
+ * the `unsupported` branch type signature MUST NOT include `base64`.
+ * Future contributors who try to expand the state to "carry base64
+ * alongside the unsupported outcome for debugging" must update both
+ * this type AND the kenji-gate test (which fails closed).
+ */
+type ImagePreviewLoadState =
   | { state: 'loading' }
-  | { state: 'done'; value: ArtifactBinaryReadResult };
+  | { state: 'image'; safeMime: string; base64: string }
+  | {
+      state: 'unsupported';
+      reason: Extract<PreviewResolution, { kind: 'unsupported' }>['reason'];
+    };
 
-function useBinaryRead(artifactId: string): BinaryReadState {
-  const [state, setState] = useState<BinaryReadState>({ state: 'loading' });
+function useImagePreviewLoad(artifactId: string): ImagePreviewLoadState {
+  const [state, setState] = useState<ImagePreviewLoadState>({ state: 'loading' });
   useEffect(() => {
     let cancelled = false;
     setState({ state: 'loading' });
     void (async () => {
       try {
-        const value = await window.maka.artifacts.readBinary(artifactId);
-        if (!cancelled) setState({ state: 'done', value });
-      } catch {
-        if (!cancelled) {
-          setState({
-            state: 'done',
-            value: { ok: false, reason: 'read_failed' },
-          });
+        const raw = await window.maka.artifacts.readBinary(artifactId);
+        if (cancelled) return;
+        // L2 decision happens HERE, before `setState`. The pure helper
+        // returns `{ kind: 'image', safeMime, base64 }` only when both
+        // the base64 length cap AND the MIME re-validation pass; the
+        // unsupported branch never carries base64. So `setState` only
+        // receives the post-decision shape.
+        const outcome = decideImageReadOutcome(raw);
+        if (outcome.kind === 'image') {
+          setState({ state: 'image', safeMime: outcome.safeMime, base64: outcome.base64 });
+        } else {
+          setState({ state: 'unsupported', reason: outcome.reason });
         }
+      } catch {
+        if (cancelled) return;
+        // Catch path also never carries base64 — same invariant.
+        setState({ state: 'unsupported', reason: 'read_failed' });
       }
     })();
     return () => {

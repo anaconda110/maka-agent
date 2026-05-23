@@ -13,11 +13,13 @@
 
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
+import type { ArtifactBinaryReadResult } from '@maka/core';
 import {
   ALLOWED_IMAGE_MIMES,
   IMAGE_PAYLOAD_MAX_BASE64_LENGTH,
   IMAGE_PAYLOAD_MAX_BYTES,
   decideImagePostLoad,
+  decideImageReadOutcome,
   exceedsImagePayloadCap,
   formatPreviewSize,
   normalizeAllowedImageMime,
@@ -364,6 +366,109 @@ describe('decideImagePostLoad — cross-layer resolver+sniff scenarios (@kenji m
       mimeType: 'IMAGE/PNG',
     });
     assert.deepEqual(outcome, { kind: 'image', safeMime: 'image/png', base64: smallBase64 });
+  });
+});
+
+describe('decideImageReadOutcome — IPC failure routing (@kenji msg 5fa6f6a5)', () => {
+  // PR-UI-RENDER-3a fixup: the post-readBinary chokepoint MUST run
+  // before React setState so a 10MB base64 oversize payload never
+  // enters renderer state. These tests lock the contract.
+  const smallBase64 = 'A'.repeat(100);
+  const oversizeBase64 = 'A'.repeat(IMAGE_PAYLOAD_MAX_BASE64_LENGTH + 1);
+
+  it('ok: false → unsupported(read_failed) (all failure reasons collapse here)', () => {
+    // Every `ArtifactBinaryReadFailureReason` routes to `read_failed`.
+    // The user copy is "load failed", not "format unsupported".
+    const reasons = [
+      'not_found',
+      'too_large',
+      'read_failed',
+      'not_allowed',
+      'deleted',
+      'unsupported_mime',
+    ] as const;
+    for (const reason of reasons) {
+      const result: ArtifactBinaryReadResult = { ok: false, reason };
+      assert.deepEqual(
+        decideImageReadOutcome(result),
+        { kind: 'unsupported', reason: 'read_failed' },
+        `failure reason ${reason} should map to read_failed`,
+      );
+    }
+  });
+
+  it('ok: true with valid PNG payload → image branch with safeMime + base64', () => {
+    const result: ArtifactBinaryReadResult = {
+      ok: true,
+      base64: smallBase64,
+      mimeType: 'image/png',
+    };
+    assert.deepEqual(decideImageReadOutcome(result), {
+      kind: 'image',
+      safeMime: 'image/png',
+      base64: smallBase64,
+    });
+  });
+
+  it('ok: true with oversize payload → unsupported(oversize), NO base64 in outcome', () => {
+    // This is the critical case @kenji flagged: the caller would
+    // setState with the outcome, and the outcome MUST NOT carry the
+    // 10MB base64 forward.
+    const result: ArtifactBinaryReadResult = {
+      ok: true,
+      base64: oversizeBase64,
+      mimeType: 'image/png',
+    };
+    const outcome = decideImageReadOutcome(result);
+    assert.equal(outcome.kind, 'unsupported');
+    if (outcome.kind === 'unsupported') {
+      assert.equal(outcome.reason, 'oversize');
+      // Explicit: the unsupported outcome does NOT have a base64
+      // property. The TS type already enforces this; the runtime
+      // check below is the kenji-gate to catch any future shape drift.
+      assert.equal((outcome as Record<string, unknown>).base64, undefined);
+    }
+  });
+
+  it('ok: true with disallowed MIME → unsupported(mime_disallowed), NO base64 in outcome', () => {
+    const result: ArtifactBinaryReadResult = {
+      ok: true,
+      base64: smallBase64,
+      mimeType: 'image/svg+xml',
+    };
+    const outcome = decideImageReadOutcome(result);
+    assert.equal(outcome.kind, 'unsupported');
+    if (outcome.kind === 'unsupported') {
+      assert.equal(outcome.reason, 'mime_disallowed');
+      assert.equal((outcome as Record<string, unknown>).base64, undefined);
+    }
+  });
+
+  it('ok: true with missing base64 (contract break) → unsupported(read_failed) defensively', () => {
+    // Defensive: a future main-process bug or contract drift that
+    // leaves `base64` undefined on an `ok: true` branch must route
+    // to read_failed, NOT crash and NOT shove undefined into the
+    // <img src="data:..."> attribute.
+    const malformed = { ok: true, mimeType: 'image/png' } as unknown as ArtifactBinaryReadResult;
+    assert.deepEqual(decideImageReadOutcome(malformed), { kind: 'unsupported', reason: 'read_failed' });
+  });
+
+  it('ok: true with missing mimeType (contract break) → unsupported(read_failed) defensively', () => {
+    const malformed = { ok: true, base64: 'AAAA' } as unknown as ArtifactBinaryReadResult;
+    assert.deepEqual(decideImageReadOutcome(malformed), { kind: 'unsupported', reason: 'read_failed' });
+  });
+
+  it('precedence: ok: false short-circuits before MIME / size checks', () => {
+    // Even if a malformed `ok: false` carried a base64 attribute
+    // alongside, the function should return `read_failed` based on
+    // the ok flag and never inspect the payload.
+    const malformed = {
+      ok: false,
+      reason: 'not_found',
+      base64: oversizeBase64,
+      mimeType: 'image/png',
+    } as unknown as ArtifactBinaryReadResult;
+    assert.deepEqual(decideImageReadOutcome(malformed), { kind: 'unsupported', reason: 'read_failed' });
   });
 });
 

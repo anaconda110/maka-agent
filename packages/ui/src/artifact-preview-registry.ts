@@ -40,7 +40,7 @@
  *   5. Lock new smoke.md gates.
  */
 
-import type { ArtifactKind } from '@maka/core';
+import type { ArtifactBinaryReadResult, ArtifactKind } from '@maka/core';
 
 /**
  * Narrow input to the resolver. Deliberately excludes
@@ -86,8 +86,16 @@ export type PreviewResolution =
        * - `no_mime_no_ext`: kind is `image` but neither MIME nor
        *   ext could classify it.
        * - `oversize`: `input.sizeBytes` exceeds `IMAGE_PAYLOAD_MAX_BYTES`.
+       * - `read_failed`: the post-load IPC (`readBinary`) returned an
+       *   error (`not_found` / `read_failed` / `not_allowed` /
+       *   `deleted` / `unsupported_mime` / `too_large`). The L1
+       *   resolver (`resolvePreviewKind`) NEVER returns this — it is
+       *   emitted by the L2 layer (`decideImageReadOutcome`) and
+       *   surfaced via the same `<UnsupportedArtifactPreview>` so the
+       *   user sees a distinct "load failed" copy instead of
+       *   misleading "格式不支持". @kenji review @msg 5fa6f6a5.
        */
-      reason: 'kind_disallowed' | 'mime_disallowed' | 'no_mime_no_ext' | 'oversize';
+      reason: 'kind_disallowed' | 'mime_disallowed' | 'no_mime_no_ext' | 'oversize' | 'read_failed';
     };
 
 /**
@@ -166,7 +174,7 @@ export function normalizeAllowedImageMime(mimeType: string | undefined): string 
  */
 export type ImagePostLoadOutcome =
   | { kind: 'image'; safeMime: string; base64: string }
-  | { kind: 'unsupported'; reason: 'oversize' | 'mime_disallowed' };
+  | { kind: 'unsupported'; reason: 'oversize' | 'mime_disallowed' | 'read_failed' };
 
 export function decideImagePostLoad(input: {
   base64: string;
@@ -180,6 +188,48 @@ export function decideImagePostLoad(input: {
     return { kind: 'unsupported', reason: 'mime_disallowed' };
   }
   return { kind: 'image', safeMime, base64: input.base64 };
+}
+
+/**
+ * PR-UI-RENDER-3a fixup (@kenji review @msg 5fa6f6a5) — single
+ * chokepoint for the post-`readBinary` decision.
+ *
+ * The bug v1 had: `useBinaryRead` stored the raw
+ * `ArtifactBinaryReadResult` (which carries the full base64 string)
+ * in React state, and `decideImagePostLoad` only ran at render time.
+ * That meant a 10MB base64 payload entered React state / DevTools
+ * snapshot BEFORE the cap check ran. The cap blocked `<img src=...>`
+ * rendering, but the load-bearing invariant ("large payloads must
+ * NOT live as base64 strings in React state") was already violated.
+ *
+ * This helper is the new boundary. The renderer hook calls
+ * `decideImageReadOutcome(rawReadResult)` INSIDE the async, BEFORE
+ * `setState`. The hook state then only holds the post-decision
+ * outcome, which is either an image branch (carrying the verified
+ * base64) or an unsupported branch (NO base64 in state).
+ *
+ * Three failure paths feed `read_failed`:
+ *   - `readResult.ok === false` (any IPC failure reason)
+ *   - `readResult` missing required fields (defensive; would be a
+ *     contract break by main, but we'd rather show a typed failure
+ *     than crash)
+ *
+ * Image success calls into `decideImagePostLoad`, which is still
+ * responsible for the L2 cap + MIME re-validation.
+ */
+export function decideImageReadOutcome(readResult: ArtifactBinaryReadResult): ImagePostLoadOutcome {
+  if (!readResult.ok) {
+    return { kind: 'unsupported', reason: 'read_failed' };
+  }
+  // Defensive shape check. `ArtifactBinaryReadResult`'s `ok: true`
+  // branch is typed to carry `base64` and `mimeType`, but a future
+  // main-process change that ever weakens that contract should
+  // route to `read_failed` rather than crashing or — worse —
+  // shoving an undefined into a `<img src="data:undefined;...">`.
+  if (typeof readResult.base64 !== 'string' || typeof readResult.mimeType !== 'string') {
+    return { kind: 'unsupported', reason: 'read_failed' };
+  }
+  return decideImagePostLoad({ base64: readResult.base64, mimeType: readResult.mimeType });
 }
 
 /**
