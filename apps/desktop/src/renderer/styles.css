@@ -189,15 +189,15 @@ button:active {
 }
 
 .maka-session-panel {
-  /* PR-SIDEBAR-IA-0 Phase 2 (xuan msg `47e204f2`): grid now has a
-   * dedicated row for the top-level module nav (会话/搜索/计划/技能/
-   * 每日回顾). Row order top-to-bottom:
+  /* PR-SIDEBAR-IA-0 Phase 2 (xuan msg `47e204f2` + WAWQAQ fixup
+   * `49309559`): grid is now 5 rows. The visible Chats/Pinned/Archived
+   * switcher was removed per WAWQAQ — Pinned/Archived are NOT
+   * sidebar-level tabs. Row order top-to-bottom:
    *   1. .maka-session-panel-header   — new chat button (auto)
-   *   2. .maka-sidebar-modules        — module nav (auto)  NEW
-   *   3. .maka-session-filter         — Chats/Pinned/Archived (auto, hidden when not sessions)
-   *   4. .maka-session-search         — search input (auto, hidden when not sessions)
-   *   5. .maka-session-list           — scroll container (1fr, Phase 1 fix)
-   *   6. .maka-session-panel-footer   — Update + Settings (auto)
+   *   2. .maka-sidebar-modules        — top-level module nav (auto)
+   *   3. .maka-session-search         — session-name search input (auto, hidden when not sessions)
+   *   4. .maka-session-list           — scroll container (1fr, Phase 1 fix)
+   *   5. .maka-session-panel-footer   — 版本更新 + 设置 (auto)
    * Hidden rows collapse to 0px so non-Sessions modules show only
    * header / module-nav / content / footer.
    */
@@ -205,7 +205,7 @@ button:active {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: transparent;
 }
@@ -218,6 +218,33 @@ button:active {
   display: grid;
   gap: 2px;
   padding: 4px 8px;
+}
+
+.maka-session-archive-link {
+  /* PR-SIDEBAR-IA-0 Phase 2 fixup (WAWQAQ msg `49309559` + xuan
+   * `c73e74da`): archived sessions are accessed via this small link
+   * rather than a top-level sidebar tab. Visual weight: tertiary —
+   * smaller font, low-contrast color, no border, no card chrome.
+   * The 60-session smoke fixture pins the link still rendering at
+   * the bottom of the list with footer visible. */
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground-50);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.maka-session-archive-link:hover {
+  color: var(--foreground-80);
+  background: oklch(from var(--foreground) l c h / 0.03);
+}
+.maka-session-archive-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }
 
 .maka-session-panel-header {

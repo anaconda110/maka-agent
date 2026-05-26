@@ -89,10 +89,21 @@ export type NavSelection =
 
 export type SessionFilter = 'chats' | 'flagged' | 'archived';
 
+/**
+ * PR-SIDEBAR-IA-0 Phase 2 fixup (WAWQAQ msg `49309559` + kenji
+ * `9f683ea8`): no mixed-language main labels. The filter ids stay
+ * stable (`chats` / `flagged` / `archived` — that's a contract field
+ * persisted in `NavSelection`), but the user-facing labels are
+ * Chinese.
+ *
+ * The fixup also removed the visible filter switcher from the
+ * sidebar; `flagged` and `archived` are accessed via a small link
+ * at the bottom of the session list, not via top-level tabs.
+ */
 const FILTER_LABEL: Record<SessionFilter, string> = {
-  chats: 'Chats',
-  flagged: 'Flagged',
-  archived: 'Archived',
+  chats: '全部',
+  flagged: '已置顶',
+  archived: '已归档',
 };
 
 /**
@@ -285,13 +296,14 @@ export function SessionListPanel(props: {
   rowActions?: SessionRowActions;
 }) {
   const isSessionFilter = (filter: SessionFilter) => props.selection.section === 'sessions' && props.selection.filter === filter;
-  // PR-SIDEBAR-IA-0 Phase 2: title reflects the current module label
-  // (Chinese-first per xuan `47e204f2` #5). For the Sessions module,
-  // the existing filter label is appended so users still see which
-  // session bucket is active.
-  const title = props.selection.section === 'sessions'
-    ? FILTER_LABEL[props.selection.filter]
-    : MODULE_NAV_LABEL[props.selection.section];
+  // PR-SIDEBAR-IA-0 Phase 2 fixup (WAWQAQ `49309559` + kenji
+  // `9f683ea8`): the title is the Chinese module label only. The
+  // Sessions filter (Pinned/Archived) no longer surfaces as a
+  // separate top-level tab, so the title stays "会话" regardless of
+  // which internal filter is active. The filter itself is hidden;
+  // archived access goes through a small link at the bottom of the
+  // session list.
+  const title = MODULE_NAV_LABEL[props.selection.section];
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -473,45 +485,17 @@ export function SessionListPanel(props: {
       </nav>
 
       {/*
-        Sessions module: filter chips (Chats/Pinned/Archived) +
-        search box live INSIDE the Sessions module per WAWQAQ IA
-        (`b86b47d1`). They no longer share the sidebar's top level.
+        PR-SIDEBAR-IA-0 Phase 2 fixup (WAWQAQ msg `49309559` + kenji
+        `9f683ea8`): the visible Chats / Pinned / Archived switcher
+        was removed from the sidebar entirely. Pinned sessions
+        naturally group at the top of the chats list via existing
+        `groupSessionsForFilter` logic; archived access is via the
+        small `查看已归档对话` link below the list. The internal
+        filter ids (chats / flagged / archived) remain valid for
+        `NavSelection` persistence and the ArrowLeft/Right cycle
+        keyboard affordance, but the surface is Chinese-only and
+        no longer exposes a tabbed switcher.
       */}
-      <div
-        className="maka-session-filter"
-        hidden={props.selection.section !== 'sessions'}
-      >
-        <button
-          className="maka-nav-row"
-          data-active={isSessionFilter('chats')}
-          type="button"
-          onClick={() => props.onSelect({ section: 'sessions', filter: 'chats' })}
-        >
-          <MessageSquare className="maka-nav-icon" strokeWidth={1.5} />
-          <span>Chats</span>
-          <Count value={props.sessionCounts.chats} />
-        </button>
-        <button
-          className="maka-nav-row"
-          data-active={isSessionFilter('flagged')}
-          type="button"
-          onClick={() => props.onSelect({ section: 'sessions', filter: 'flagged' })}
-        >
-          <Flag className="maka-nav-icon" strokeWidth={1.5} />
-          <span>Pinned</span>
-          <Count value={props.sessionCounts.flagged} />
-        </button>
-        <button
-          className="maka-nav-row"
-          data-active={isSessionFilter('archived')}
-          type="button"
-          onClick={() => props.onSelect({ section: 'sessions', filter: 'archived' })}
-        >
-          <Archive className="maka-nav-icon" strokeWidth={1.5} />
-          <span>Archived</span>
-          <Count value={props.sessionCounts.archived} />
-        </button>
-      </div>
 
       <div
         className="maka-session-search"
@@ -640,6 +624,31 @@ export function SessionListPanel(props: {
                 onSelectSession={props.onSelectSession}
                 rowActions={props.rowActions}
               />
+              {/*
+                PR-SIDEBAR-IA-0 Phase 2 fixup (WAWQAQ `49309559`):
+                archived sessions are NOT a top-level sidebar tab.
+                Access goes through a small link at the bottom of
+                the list. When the user IS currently viewing
+                archived, the link flips to "返回会话" so they can
+                exit the filter without a separate switcher.
+              */}
+              {props.sessionCounts.archived > 0 && (
+                <button
+                  type="button"
+                  className="maka-session-archive-link"
+                  onClick={() => {
+                    if (props.selection.section === 'sessions' && props.selection.filter === 'archived') {
+                      props.onSelect({ section: 'sessions', filter: 'chats' });
+                    } else {
+                      props.onSelect({ section: 'sessions', filter: 'archived' });
+                    }
+                  }}
+                >
+                  {props.selection.section === 'sessions' && props.selection.filter === 'archived'
+                    ? '返回全部会话'
+                    : `查看已归档对话 (${props.sessionCounts.archived})`}
+                </button>
+              )}
             </div>
           )
         ) : (
@@ -1413,7 +1422,7 @@ export function ChatView(props: {
   if (props.mode === 'skills') {
     return (
       <main className="maka-main detailPane">
-        <div className="maka-center-state">No skill selected</div>
+        <div className="maka-center-state">未选择技能</div>
       </main>
     );
   }
