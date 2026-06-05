@@ -67,6 +67,7 @@ import {
   buildLocalMemoryPromptBody,
   defaultVoiceCaptureCaps,
   findLocalMemoryEntryDraftRange,
+  generalizedErrorMessageChinese,
   parseLocalMemoryMarkdown,
   setLocalMemoryEntryStatusDraft,
   validateVoiceCaptureRequest,
@@ -3588,8 +3589,15 @@ function memoryStatusTone(status: LocalMemoryState['status']): 'success' | 'info
 }
 
 function settingsActionErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
-  if (typeof error === 'string' && error.trim()) return error.trim();
+  const raw = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : '';
+  const classified = generalizedErrorMessageChinese(new Error(raw), '');
+  if (classified) return classified;
+  const redacted = redactSecrets(raw).trim();
+  if (redacted && /[\u4E00-\u9FFF]/.test(redacted)) return redacted;
   return '未知错误，请稍后重试。';
 }
 

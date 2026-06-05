@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { release as osRelease, arch as osArch } from 'node:os';
 import {
   generalizedErrorMessage,
+  generalizedErrorMessageChinese,
   redactSecrets,
   buildHealthSnapshot,
   healthSignalFromCapability,
@@ -111,6 +112,7 @@ import type {
   NetworkSettings as ContractNetworkSettings,
   ProxySettings,
   TestProxyInput,
+  TestProxyResult,
 } from '@maka/core/settings/network-settings';
 import {
   NETWORK_DEFAULTS,
@@ -1296,6 +1298,19 @@ function attachmentValidationFailureCopy(reason: AttachmentValidationFailureReas
   }
 }
 
+function proxyTestFailureMessage(result: TestProxyResult): string {
+  const raw = redactSecrets(result.error ?? '').trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes('proxy disabled')) return '代理未启用，请先打开代理开关。';
+  if (lower.includes('proxy host/port required')) return '请填写代理服务器地址和端口后再测试。';
+  if (lower.includes('proxy test timeout') || lower.includes('timeout')) return '代理测试超时，请检查代理服务是否可达。';
+  if (result.status) return `代理测试返回 HTTP ${result.status}，请检查代理服务或测试地址。`;
+  const classified = generalizedErrorMessageChinese(raw, '');
+  if (classified) return classified;
+  if (raw && /[\u4E00-\u9FFF]/.test(raw)) return raw;
+  return '代理不可达，请检查代理服务器地址、端口或认证信息。';
+}
+
 function registerIpc(): void {
   async function currentProjectRoot(): Promise<string> {
     return resolveProjectRoot([process.cwd(), app.getAppPath()]);
@@ -2325,14 +2340,14 @@ function registerIpc(): void {
   });
   ipcMain.handle('connections:test', async (_event, slug: string, opts?: { model?: string }) => {
     const connection = await connectionStore.get(slug);
-    if (!connection) return { ok: false, errorMessage: `No such connection: ${slug}` };
+    if (!connection) return { ok: false, errorMessage: `找不到模型连接：${slug}` };
     const apiKey = await resolveConnectionSecret(slug);
     if (PROVIDER_DEFAULTS[connection.providerType].authKind !== 'none' && !apiKey) {
       return {
         ok: false,
         errorMessage: PROVIDER_DEFAULTS[connection.providerType].authKind === 'oauth_token'
-          ? 'No OAuth login stored for this connection'
-          : 'No API key set for this connection',
+          ? '这个 OAuth 模型连接还没有登录'
+          : '这个模型连接还没有保存 API key',
         errorClass: 'auth',
       };
     }
@@ -2343,12 +2358,12 @@ function registerIpc(): void {
   });
   ipcMain.handle('connections:fetchModels', async (_event, slug: string) => {
     const connection = await connectionStore.get(slug);
-    if (!connection) throw new Error(`No such connection: ${slug}`);
+    if (!connection) throw new Error(`找不到模型连接：${slug}`);
     const apiKey = await resolveConnectionSecret(slug);
     if (PROVIDER_DEFAULTS[connection.providerType].authKind !== 'none' && !apiKey) {
       throw new Error(PROVIDER_DEFAULTS[connection.providerType].authKind === 'oauth_token'
-        ? 'No OAuth login stored for this connection'
-        : 'No API key set for this connection');
+        ? '这个 OAuth 模型连接还没有登录'
+        : '这个模型连接还没有保存 API key');
     }
     try {
       const fetchedAt = Date.now();
@@ -2365,7 +2380,7 @@ function registerIpc(): void {
         fetchedAt,
       };
     } catch (error) {
-      throw new Error(generalizedErrorMessage(error, 'Failed to fetch provider models'));
+      throw new Error(generalizedErrorMessageChinese(error, '拉取模型列表失败'));
     }
   });
   ipcMain.handle('connections:hasSecret', async (_event, slug: string) =>
@@ -2454,7 +2469,7 @@ function registerIpc(): void {
     if (!result.ok) {
       return {
         ok: false,
-        message: result.error ?? (result.status ? `HTTP ${result.status}` : '代理不可达'),
+        message: proxyTestFailureMessage(result),
         latencyMs,
       } satisfies SettingsTestResult;
     }

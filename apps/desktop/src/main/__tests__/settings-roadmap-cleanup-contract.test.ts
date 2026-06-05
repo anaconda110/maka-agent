@@ -50,6 +50,43 @@ describe('Settings coming-soon cleanup contract', () => {
     assert.match(settings, /本地自检/, 'Voice status badge should describe the shipped local smoke boundary');
   });
 
+  it('sanitizes Settings action errors before they reach visible toasts', async () => {
+    const settings = await readRepo('apps/desktop/src/renderer/settings/SettingsModal.tsx');
+    const helper = settings.match(/function settingsActionErrorMessage\(error: unknown\): string \{[\s\S]*?\n\}/);
+
+    assert.ok(helper, 'SettingsModal must keep a shared settingsActionErrorMessage helper');
+    assert.match(
+      settings,
+      /generalizedErrorMessageChinese,\n\s+parseLocalMemoryMarkdown/,
+      'Settings action errors should use the shared Chinese generalized-error classifier',
+    );
+    assert.match(
+      helper![0],
+      /generalizedErrorMessageChinese\(new Error\(raw\), ''\)/,
+      'Settings action errors must classify timeout/auth/network/5xx English errors into Chinese copy',
+    );
+    assert.match(
+      helper![0],
+      /redactSecrets\(raw\)\.trim\(\)/,
+      'Settings action errors must redact secrets before preserving any raw message',
+    );
+    assert.match(
+      helper![0],
+      /\[\\u4E00-\\u9FFF\]/,
+      'Settings action errors may preserve already-localized messages only after redaction',
+    );
+    assert.doesNotMatch(
+      helper![0],
+      /error\.message\.trim\(\)\) return error\.message\.trim\(\)|typeof error === 'string' && error\.trim\(\)\) return error\.trim\(\)/,
+      'Settings action errors must not directly echo raw Error.message or raw string input into visible toasts',
+    );
+    assert.match(
+      helper![0],
+      /return '未知错误，请稍后重试。'/,
+      'Unknown non-localized Settings action errors should degrade to a Chinese fallback',
+    );
+  });
+
   it('keeps Voice settings boundary copy in current-policy language', async () => {
     const settings = await readRepo('apps/desktop/src/renderer/settings/SettingsModal.tsx');
     const voicePage = settings.match(/function VoiceModelsSettingsPage\(\)[\s\S]*?async function readBrowserMicrophonePermission/);
