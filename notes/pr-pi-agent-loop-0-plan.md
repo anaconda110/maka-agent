@@ -9,14 +9,11 @@ must not surface as user-visible copy.
 
 ## Source Anchors
 
-Reference app source:
-
-- `/Users/jakevin/.Trash/alma-re/docs/01-agent-loop.md`
-- `/Users/jakevin/.Trash/alma-re/docs/20-acp.md`
-- `/Users/jakevin/.Trash/alma-re/docs/31-llm-calls.md`
-- `/Users/jakevin/.Trash/alma-re/docs/39-streaming-deep.md`
-- `/Users/jakevin/.Trash/alma-re/docs/44-agents-deep.md`
-- `/Users/jakevin/.Trash/alma-re/readable/main.js:20597-21460`
+Reference app source: an upstream desktop agent's ACP / `pi-acp`
+coding-agent path was inspected offline. Specific paths are held
+out of this repo. The findings used in this plan are summarized
+in §"Reference Loop Findings" below — no upstream file paths are
+required to follow the migration.
 
 Maka source:
 
