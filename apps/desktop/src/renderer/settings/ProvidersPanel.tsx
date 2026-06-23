@@ -236,7 +236,7 @@ export function ProvidersPanel({ bridge }: { bridge: ConnectionsBridge }) {
                 title={chipTitle(connection)}
               >
                 <ProviderLogo type={connection.providerType} compact />
-                <span>
+                <span className="enabledProviderChipText">
                   <strong>{connection.name}</strong>
                   <small>{providerDisplay(connection.providerType).name}</small>
                 </span>
