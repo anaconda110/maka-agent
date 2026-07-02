@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  AgentRunStore,
-  RuntimeEvent,
-  RuntimeEventStore,
-  SessionBlockedReason,
-  SessionHeader,
-  SessionStatus,
-  StoredMessage,
+import {
+  isTerminalRuntimeEvent,
+  type AgentRunStore,
+  type RuntimeEvent,
+  type RuntimeEventStore,
+  type SessionBlockedReason,
+  type SessionHeader,
+  type SessionStatus,
+  type StoredMessage,
 } from '@maka/core';
 import {
   AgentRun,
@@ -333,6 +334,7 @@ export async function runTaskOnce(
         header,
         instruction,
         ...(deps.priorRuntimeContext ? { priorRuntimeContext: deps.priorRuntimeContext } : {}),
+        requireTerminalRuntimeEventWrite: Boolean(runtimeEventStore),
         now,
         newId,
       });
@@ -408,6 +410,7 @@ export async function runTaskOnce(
             header,
             instruction: gateDecision.prompt,
             ...(deps.priorRuntimeContext ? { priorRuntimeContext: deps.priorRuntimeContext } : {}),
+            requireTerminalRuntimeEventWrite: Boolean(runtimeEventStore),
             now,
             newId,
           });
@@ -839,6 +842,7 @@ interface RunRuntimeAttemptInput {
   header: SessionHeader;
   instruction: string;
   priorRuntimeContext?: readonly RuntimeEvent[];
+  requireTerminalRuntimeEventWrite: boolean;
   now: () => number;
   newId: () => string;
 }
@@ -857,8 +861,9 @@ async function runRuntimeAttempt(input: RunRuntimeAttemptInput): Promise<Invocat
     backend: begin.backend,
     drainAfterTerminal: true,
     onSessionEvent: async (sessionEvent, runtimeEvent) => {
-      await input.run.recordSessionEvent(sessionEvent);
-      await input.run.recordRuntimeEvents([runtimeEvent]);
+      await input.run.acceptMappedEvent(sessionEvent, runtimeEvent, {
+        requireTerminalWrite: input.requireTerminalRuntimeEventWrite,
+      });
     },
     onError: async (error) => {
       await input.run.recordFailure(error);
@@ -870,7 +875,6 @@ async function runRuntimeAttempt(input: RunRuntimeAttemptInput): Promise<Invocat
   const runner = new RuntimeRunner({
     flow,
     providers: { newId: input.newId, now: input.now },
-    onInitialRuntimeEvent: (event) => input.run.recordRuntimeEvents([event]),
     stopOnTerminal: false,
   });
   const runtimeContext = [
@@ -880,12 +884,14 @@ async function runRuntimeAttempt(input: RunRuntimeAttemptInput): Promise<Invocat
 
   const invocation = await runner.run({
     sessionId: input.header.id,
+    invocationId: begin.initialRuntimeEvent.invocationId,
     runId: input.run.runId,
     turnId: input.run.turnId,
     text: input.instruction,
     context: begin.backendInput.context,
     ...(runtimeContext.length > 0 ? { runtimeContext } : {}),
     ...(begin.backendInput.attachments ? { attachments: begin.backendInput.attachments } : {}),
+    initialRuntimeEvent: begin.initialRuntimeEvent,
     source: 'test',
     lineage: input.run.lineage,
   });
@@ -1311,6 +1317,14 @@ function appendTaskEvent(store: TaskRunStore, taskRunId: string, event: TaskEven
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function isPermissionHandoffTerminal(event: { actions?: { stateDelta?: Record<string, unknown> } }): boolean {
+  return event.actions?.stateDelta?.stopReason === 'permission_handoff';
+}
+
+function isNonTerminalErrorRuntimeEvent(event: RuntimeEvent): boolean {
+  return event.content?.kind === 'error' && !isTerminalRuntimeEvent(event);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

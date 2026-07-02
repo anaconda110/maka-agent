@@ -47,6 +47,7 @@ export interface RuntimeKernelDeps {
   childTools?: readonly MakaTool[];
   runtimeSource?: InvocationSource;
   runtimeInvocationObserver?: (result: InvocationResult) => void | Promise<void>;
+  repairRunRuntimeLedger?: (sessionId: string, runId: string) => Promise<boolean>;
 }
 
 interface ActiveSession extends AgentRunActiveSession {
@@ -61,7 +62,11 @@ export class RuntimeKernel implements RuntimeKernelLike {
   private readonly active = new Map<string, ActiveSession>();
   private readonly childActive = new Map<string, ActiveSession>();
 
-  constructor(private readonly deps: RuntimeKernelDeps) {}
+  constructor(private readonly deps: RuntimeKernelDeps) {
+    if (deps.runStore && !deps.runtimeEventStore) {
+      throw new Error('RuntimeEventStore is required when AgentRunStore is configured');
+    }
+  }
 
   async *startTurn(
     sessionId: string,
@@ -75,6 +80,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       store: this.deps.store,
       runStore: this.deps.runStore,
       runtimeEventStore: this.deps.runtimeEventStore,
+      repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
       hooks: {
@@ -125,6 +131,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       store: this.deps.store,
       runStore: this.deps.runStore,
       runtimeEventStore: this.deps.runtimeEventStore,
+      repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
       recordSessionMessages: false,
@@ -163,8 +170,9 @@ export class RuntimeKernel implements RuntimeKernelLike {
       backend: begin.backend,
       drainAfterTerminal: true,
       onSessionEvent: async (sessionEvent, runtimeEvent) => {
-        await run.recordSessionEvent(sessionEvent);
-        await run.recordRuntimeEvents([runtimeEvent]);
+        await run.acceptMappedEvent(sessionEvent, runtimeEvent, {
+          requireTerminalWrite: Boolean(this.deps.runtimeEventStore),
+        });
         await sessionEvents.push(sessionEvent);
       },
       onError: async (error) => {
@@ -175,24 +183,30 @@ export class RuntimeKernel implements RuntimeKernelLike {
       },
       onFinally: async () => {
         flowDone = true;
-        await run.finalize();
-        sessionEvents.close();
+        try {
+          await run.finalize();
+          sessionEvents.close();
+        } catch (error) {
+          sessionEvents.fail(error);
+          throw error;
+        }
       },
     });
     const runner = new RuntimeRunner({
       flow: aiSdkFlow,
       providers: { newId: this.deps.newId, now: this.deps.now },
-      onInitialRuntimeEvent: (event) => run.recordRuntimeEvents([event]),
       stopOnTerminal: false,
     });
     const runnerResult = runner.run({
       sessionId,
+      invocationId: begin.initialRuntimeEvent.invocationId,
       runId: run.runId,
       turnId: run.turnId,
       text: input.text,
       ...(begin.backendInput.attachments ? { attachments: begin.backendInput.attachments } : {}),
       context: begin.backendInput.context,
       ...(begin.backendInput.runtimeContext !== undefined ? { runtimeContext: begin.backendInput.runtimeContext } : {}),
+      initialRuntimeEvent: begin.initialRuntimeEvent,
       source: this.deps.runtimeSource ?? 'desktop',
       lineage: run.lineage,
       abortSignal: abortController.signal,
@@ -222,11 +236,11 @@ export class RuntimeKernel implements RuntimeKernelLike {
     const activeSessions = this.activeSessionsFor(sessionId);
     if (activeSessions.length === 0) return;
     const abortSource = normalizeStopSessionSource(input.source);
-    await Promise.all(activeSessions.map((active) => active.backend.stop('user_stop')));
     const activeRuns = activeSessions.flatMap((active) => [...active.activeRuns.values()]);
     for (const run of activeRuns) {
       run.stop(input.source);
     }
+    await Promise.all(activeSessions.map((active) => active.backend.stop('user_stop')));
     await this.updateStatus(sessionId, 'aborted');
     for (const run of activeRuns.filter((activeRun) => !activeRun.lineage.parentRunId)) {
       await this.appendTurnState(
