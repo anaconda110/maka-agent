@@ -394,7 +394,7 @@ export function PlanReminderPanel(props: {
           }}
         >
           <div className="maka-plan-tabs-bar">
-            <TabsList className="maka-plan-tabs-list" aria-label="计划提醒视图">
+            <TabsList variant="underline" className="maka-plan-tabs-list" aria-label="计划提醒视图">
               <TabsTrigger className="maka-plan-tab" value="tasks">
                 我的定时任务
                 <span>{props.reminders.length}</span>
