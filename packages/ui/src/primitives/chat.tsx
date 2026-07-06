@@ -136,28 +136,6 @@ export function Bubble({
 const markerVariants = cva("", {
   variants: {
     variant: {
-      // `.maka-turn-summary` + the `tool-output.css` measure-column re-anchor:
-      // one quiet caption line (model · tools · duration · tokens).
-      summary:
-        "flex w-full max-w-[var(--maka-chat-measure,680px)] flex-wrap items-center justify-start gap-1.5 mb-0.5 ml-0 mr-auto text-[color:var(--muted-foreground)] [font-variant-numeric:tabular-nums]",
-      // `.maka-turn-summary-chip` (+ `::before` middot, nested `code`, and the
-      // `[data-kind]` / `[data-state]` / `[data-switched]` conditionals). The
-      // call site keeps passing `data-kind` / `data-state` / `data-switched`,
-      // which the literalized `data-[…]:` variants read.
-      "summary-chip":
-        "inline-flex items-center gap-1 text-[color:var(--muted-foreground)] text-[12px] font-medium leading-[1.4]"
-        + " [&:not(:first-child)]:before:content-['·'] [&:not(:first-child)]:before:mr-1 [&:not(:first-child)]:before:text-[color:var(--muted-foreground)] [&:not(:first-child)]:before:font-normal"
-        + " [&_code]:bg-transparent [&_code]:text-[color:inherit] [&_code]:[font-family:var(--font-mono)] [&_code]:text-[12px]"
-        + " data-[kind=model]:[&_code]:text-[color:var(--foreground-secondary)] data-[kind=model]:[&_code]:font-semibold"
-        + " data-[kind=tools]:text-[color:var(--muted-foreground)]"
-        + " data-[kind=duration]:[font-variant-numeric:tabular-nums]"
-        + " data-[kind=tools]:min-w-[5rem] data-[kind=duration]:min-w-[4rem]"
-        + " data-[kind=tokens]:[font-variant-numeric:tabular-nums] data-[kind=tokens]:[font-family:var(--font-mono)] data-[kind=tokens]:text-[12px]"
-        + " data-[state=in-progress]:text-[color:var(--status-running)] data-[state=in-progress]:font-semibold"
-        + " data-[kind=model]:data-[switched=true]:[&_code]:text-[color:var(--foreground-secondary)]",
-      // `.maka-turn-summary-chip-switched` — the muted "切换" pill.
-      "summary-switched":
-        "ml-1 px-1.5 py-[1px] rounded-[var(--radius-pill)] bg-[oklch(from_var(--foreground)_l_c_h_/_0.06)] text-[color:var(--foreground-secondary)] text-[11px] font-semibold",
       // `.maka-turn-aborted-marker` (+ its italic `em`) — dormant, muted.
       aborted:
         "inline-flex w-fit items-center gap-1 mx-0 mt-0.5 mb-1 px-1.5 py-0.5 rounded-[var(--radius-control)] bg-[var(--foreground-5)] text-[color:var(--foreground-secondary)] text-[12px] italic [&_em]:italic",
@@ -205,18 +183,21 @@ const markerVariants = cva("", {
         // Folding them in keeps the exact pixels while the marker shell owns its
         // geometry (verified equal to `main` by computed style, headless electron).
         "inline-flex items-center gap-1.5 min-h-[28px] h-8 px-2 py-1 rounded-[var(--radius-surface)] [border:0] bg-transparent text-[color:var(--muted-foreground)] text-[12px] leading-[16px] [transition:background_120ms_ease,color_120ms_ease,opacity_120ms_ease]"
-        + " [&:hover:not(:disabled)]:bg-[oklch(from_var(--foreground)_l_c_h_/_0.05)] [&:hover:not(:disabled)]:text-[color:var(--foreground)]"
+        + " [&:hover:not([aria-disabled=true])]:bg-[oklch(from_var(--foreground)_l_c_h_/_0.05)] [&:hover:not([aria-disabled=true])]:text-[color:var(--foreground)]"
         + " focus-visible:[outline:2px_solid_var(--focus-ring)] focus-visible:[outline-offset:2px]"
-        + " disabled:opacity-[0.45] disabled:cursor-not-allowed aria-disabled:opacity-[0.45] aria-disabled:cursor-not-allowed"
+        + " aria-disabled:opacity-[0.45] aria-disabled:cursor-not-allowed"
+        // footer actions drop the real `disabled` attr so tooltips can show
+        // on disabled actions; neutralize the UiButton `quiet` variant's base
+        // hover/active so an aria-disabled action does not look clickable.
+        + " [&[aria-disabled=true]]:hover:bg-transparent [&[aria-disabled=true]]:hover:text-[color:var(--muted-foreground)] [&[aria-disabled=true]]:active:bg-transparent"
         + " data-[pending=true]:opacity-[0.78] data-[pending=true]:cursor-progress"
-        // Copy-in-progress sets BOTH `disabled` and `data-pending`. The plain
-        // `data-[pending=true]:opacity-[0.78]` and `disabled:opacity-[0.45]`
-        // utilities have equal specificity (0,2,0), so the pending value would
-        // only win on Tailwind's source order. These combined-modifier guards
-        // raise pending to (0,3,0) so it beats the disabled dim by specificity,
-        // not order — keeping the in-progress 0.78 stable regardless of emit
-        // sequence. (Both `disabled`/`aria-disabled` are always set together.)
-        + " disabled:data-[pending=true]:opacity-[0.78] aria-disabled:data-[pending=true]:opacity-[0.78]"
+        // Copy-in-progress sets `aria-disabled` and `data-pending` together.
+        // `aria-disabled:opacity-[0.45]` and `data-[pending=true]:opacity-[0.78]`
+        // have equal specificity (0,2,0), so pending would only win on source
+        // order. This combined modifier raises pending to (0,3,0) so it beats
+        // the disabled dim by specificity, not order — keeping the in-progress
+        // 0.78 stable regardless of emit sequence.
+        + " aria-disabled:data-[pending=true]:opacity-[0.78]"
         + " data-[copy-feedback=copied]:text-[color:var(--link)] data-[copy-feedback=failed]:text-[color:var(--destructive)]",
     },
   },
