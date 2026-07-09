@@ -1,5 +1,6 @@
 import type { MakaTool, ToolAvailabilityConfig } from '@maka/runtime';
 import {
+  buildTaskLedgerTools,
   buildForegroundBashTool,
   buildSubagentProjectionTools,
   buildSubagentSpawnTool,
@@ -8,21 +9,31 @@ import {
 import { withFileWriteLock } from '@maka/runtime/file-write-lock';
 import { posix as pathPosix } from 'node:path';
 import { z } from 'zod';
+import { buildHeavyTaskAcceptanceDagTools, type HeavyTaskAcceptanceDagRecorder } from './heavy-task-acceptance-dag.js';
+import { buildHeavyTaskAdversarialCheckTools, type HeavyTaskAdversarialCheckRecorder } from './heavy-task-adversarial-check.js';
 import type { HeavyTaskEvidenceRecorder } from './heavy-task-evidence.js';
 import { buildHeavyTaskProgressTools, type HeavyTaskProgressRecorder } from './heavy-task-progress.js';
 import { buildHeavyTaskSelfCheckTools, type HeavyTaskSelfCheckRecorder } from './heavy-task-self-check.js';
 import type { IsolatedToolExecutor } from './isolation.js';
+import type { TaskLedgerStore } from '@maka/core/task-ledger';
 import {
   buildTaskLedgerExperimentTools,
   type TaskLedgerExperimentStore,
 } from './task-ledger-experiment.js';
 
 export interface BuildIsolatedHeadlessToolsOptions {
+  exposeAgentTools?: boolean;
+  exposeAdversarialCheckTools?: boolean;
   heavyTaskEvidence?: HeavyTaskEvidenceRecorder;
   heavyTaskProgress?: HeavyTaskProgressRecorder;
+  heavyTaskAcceptanceDag?: HeavyTaskAcceptanceDagRecorder;
+  heavyTaskAdversarialCheck?: HeavyTaskAdversarialCheckRecorder;
   heavyTaskSelfCheck?: HeavyTaskSelfCheckRecorder;
   taskLedgerExperiment?: {
     store: TaskLedgerExperimentStore;
+  };
+  taskLedger?: {
+    store: TaskLedgerStore;
   };
 }
 
@@ -51,17 +62,30 @@ export function buildIsolatedHeadlessTools(
     buildIsolatedEditTool(executor, options),
     buildIsolatedGlobTool(executor, options),
     buildIsolatedGrepTool(executor, options),
-    buildSubagentSpawnTool(),
-    ...buildSubagentProjectionTools(),
   ];
+  if (options.exposeAgentTools !== false) {
+    tools.push(
+      buildSubagentSpawnTool({ permissionRequired: false }),
+      ...buildSubagentProjectionTools(),
+    );
+  }
   if (options.heavyTaskProgress) {
     tools.push(...buildHeavyTaskProgressTools(options.heavyTaskProgress));
+  }
+  if (options.heavyTaskAcceptanceDag) {
+    tools.push(...buildHeavyTaskAcceptanceDagTools(options.heavyTaskAcceptanceDag));
+  }
+  if (options.heavyTaskAdversarialCheck && options.exposeAdversarialCheckTools !== false) {
+    tools.push(...buildHeavyTaskAdversarialCheckTools(options.heavyTaskAdversarialCheck));
   }
   if (options.heavyTaskSelfCheck) {
     tools.push(...buildHeavyTaskSelfCheckTools(options.heavyTaskSelfCheck));
   }
   if (options.taskLedgerExperiment) {
     tools.push(...buildTaskLedgerExperimentTools(options.taskLedgerExperiment));
+  }
+  if (options.taskLedger) {
+    tools.push(...buildTaskLedgerTools({ store: options.taskLedger.store }));
   }
   return tools;
 }
@@ -80,7 +104,7 @@ export function buildIsolatedHeadlessToolAvailability(): ToolAvailabilityConfig 
 
 export function buildIsolatedBashTool(
   executor: IsolatedToolExecutor,
-  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence'> = {},
+  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence' | 'heavyTaskAcceptanceDag'> = {},
 ): MakaTool {
   return buildForegroundBashTool({
     description:
@@ -89,6 +113,8 @@ export function buildIsolatedBashTool(
     defaultTimeoutMs: cleanupCommandTimeoutMs,
     emitReturnedOutput: true,
     execute: async ({ command, cwd, timeoutMs }) => {
+      const blocker = await heavyTaskDagFirstToolBlocker(options, 'Bash', command);
+      if (blocker) return blockedBashResult(blocker);
       // boundedTail: Bash is the one caller that wants a recoverable tail of a
       // huge, never-killed output. Read/Glob/Grep deliberately omit it so they
       // get full, head-first content from the executor.
@@ -109,6 +135,106 @@ function cleanupCommandTimeoutMs(command: string): number | undefined {
   // Existing Harbor cleanup can exceed the default in large gcov tasks. Keep the
   // match exact so only the known generated cleanup command gets the allowance.
   return command === 'rm -f *.gcda *.gcno *.gcov' ? 120_000 : undefined;
+}
+
+const DAG_FIRST_BLOCK_EXIT_CODE = 126;
+const DAG_FIRST_MINIMAL_BASH_COMMANDS = new Set([
+  '[',
+  'cat',
+  'command',
+  'cut',
+  'date',
+  'du',
+  'echo',
+  'file',
+  'find',
+  'grep',
+  'head',
+  'id',
+  'ls',
+  'od',
+  'printf',
+  'pwd',
+  'rg',
+  'sed',
+  'sort',
+  'stat',
+  'strings',
+  'tail',
+  'test',
+  'uname',
+  'uniq',
+  'wc',
+  'which',
+  'xxd',
+]);
+
+async function heavyTaskDagFirstToolBlocker(
+  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskAcceptanceDag'>,
+  toolName: 'Bash' | 'Write' | 'Edit',
+  command?: string,
+): Promise<string | undefined> {
+  const dagBlocker = await options.heavyTaskAcceptanceDag?.acceptedDagForWorkBlocker();
+  if (!dagBlocker) return undefined;
+  if (toolName === 'Bash' && command !== undefined && isMinimalPublicInspectionBash(command)) return undefined;
+  const allowed =
+    'Allowed before the accepted DAG: Read, Glob, Grep, acceptance_dag_submit, and minimal read-only Bash inspection such as ls, pwd, cat, sed -n, head, tail, grep, rg, find, wc, stat, file, and command -v.';
+  return `DAG-first guard blocked ${toolName}: ${dagBlocker}. Submit an accepted public acceptance DAG with acceptance_dag_submit before Write/Edit or non-inspection Bash. ${allowed}`;
+}
+
+function blockedBashResult(message: string) {
+  return {
+    exitCode: DAG_FIRST_BLOCK_EXIT_CODE,
+    stdout: '',
+    stderr: `${message}\n`,
+  };
+}
+
+function blockedFileMutationResult(path: string, message: string) {
+  return {
+    ok: false,
+    path,
+    bytes: 0,
+    replacements: 0,
+    error: message,
+  };
+}
+
+function isMinimalPublicInspectionBash(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  if (/[\r`]/.test(trimmed) || /\$\(/.test(trimmed)) return false;
+  const withoutStderrRedirects = trimmed
+    .replace(/\s+2>\s*\/dev\/null\b/g, '')
+    .replace(/\s+2>&1\b/g, '');
+  if (/[<>]/.test(withoutStderrRedirects)) return false;
+  const segments = withoutStderrRedirects
+    .split(/&&|\|\||[;|\n]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length === 0) return false;
+  return segments.every(isMinimalPublicInspectionSegment);
+}
+
+function isMinimalPublicInspectionSegment(segment: string): boolean {
+  const tokens = shellLikeTokens(segment);
+  const command = tokens[0];
+  if (!command || command.includes('/') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(command)) return false;
+  if (!DAG_FIRST_MINIMAL_BASH_COMMANDS.has(command)) return false;
+  if (command === 'command') return tokens[1] === '-v' && Boolean(tokens[2]) && tokens.length <= 3;
+  if (command === 'sed') return !tokens.some((token) => token === '-i' || token.startsWith('-i'));
+  if (command === 'find') return !tokens.some((token) =>
+    token === '-delete' || token === '-exec' || token === '-execdir' || token === '-ok');
+  return true;
+}
+
+function shellLikeTokens(segment: string): string[] {
+  const matches = segment.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? [];
+  return matches.map((token) => (
+    (token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))
+      ? token.slice(1, -1)
+      : token
+  ));
 }
 
 export function buildIsolatedReadTool(
@@ -144,7 +270,7 @@ export function buildIsolatedReadTool(
 
 export function buildIsolatedWriteTool(
   executor: IsolatedToolExecutor,
-  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence'> = {},
+  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence' | 'heavyTaskAcceptanceDag'> = {},
 ): MakaTool {
   return {
     name: 'Write',
@@ -156,6 +282,12 @@ export function buildIsolatedWriteTool(
       const normalizedPath = normalizeWorkspacePath(path, cwd, 'Write path');
       const input = { cwd, path: normalizedPath, content };
       return await withFileWriteLock(fileWriteKey(cwd, normalizedPath), async () => {
+        const blocker = await heavyTaskDagFirstToolBlocker(options, 'Write');
+        if (blocker) {
+          const result = blockedFileMutationResult(normalizedPath, blocker);
+          await options.heavyTaskEvidence?.recordToolEvidence({ name: 'Write', input, result }, ctx);
+          return result;
+        }
         if (executor.writeFile) {
           const result = await executor.writeFile(input);
           await options.heavyTaskEvidence?.recordToolEvidence({ name: 'Write', input, result }, ctx);
@@ -175,7 +307,7 @@ export function buildIsolatedWriteTool(
 
 export function buildIsolatedEditTool(
   executor: IsolatedToolExecutor,
-  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence'> = {},
+  options: Pick<BuildIsolatedHeadlessToolsOptions, 'heavyTaskEvidence' | 'heavyTaskAcceptanceDag'> = {},
 ): MakaTool {
   return {
     name: 'Edit',
@@ -196,6 +328,12 @@ export function buildIsolatedEditTool(
       const normalizedPath = normalizeWorkspacePath(path, cwd, 'Edit path');
       const input = { cwd, path: normalizedPath, oldString: old_string, newString: new_string };
       return await withFileWriteLock(fileWriteKey(cwd, normalizedPath), async () => {
+        const blocker = await heavyTaskDagFirstToolBlocker(options, 'Edit');
+        if (blocker) {
+          const result = blockedFileMutationResult(normalizedPath, blocker);
+          await options.heavyTaskEvidence?.recordToolEvidence({ name: 'Edit', input, result }, ctx);
+          return result;
+        }
         const raw = await readIsolatedFileBytes(executor, cwd, normalizedPath);
         const { content, ...metadata } = computeEditBytes(raw, old_string, new_string, normalizedPath);
         await writeIsolatedFileBytes(executor, cwd, normalizedPath, content);

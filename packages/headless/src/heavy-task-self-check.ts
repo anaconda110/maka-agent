@@ -268,11 +268,13 @@ export function validateHeavyTaskPublicStrings(
   values: readonly string[],
   now: number,
   acceptedPublicReason: string,
+  options: { allowCategories?: readonly string[] } = {},
 ): HeavyTaskPublicSelfCheckValidation {
   const categories = new Set<string>();
+  const allowed = new Set(options.allowCategories ?? []);
   for (const value of values) {
     for (const category of categoriesForString(value)) {
-      categories.add(category);
+      if (!allowed.has(category)) categories.add(category);
     }
   }
   if (categories.size > 0) {

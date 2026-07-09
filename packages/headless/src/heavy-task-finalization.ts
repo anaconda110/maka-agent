@@ -1,7 +1,12 @@
+import { heavyTaskAcceptanceDagBlocker } from './heavy-task-acceptance-dag.js';
+import { adversarialCheckBlocker } from './heavy-task-adversarial-check.js';
 import { heavyTaskSelfCheckStrongPassBlocker, isAcceptedHeavyTaskSelfCheck } from './heavy-task-self-check.js';
 import type {
   AutonomousDecision,
   AutonomousResultTaxonomy,
+  HeavyTaskAdversarialCheckExecutionState,
+  HeavyTaskAdversarialCheckPlanState,
+  HeavyTaskAcceptanceDagState,
   HeavyTaskModeFacts,
   HeavyTaskSelfCheckPlanState,
   HeavyTaskSelfCheckStatus,
@@ -62,6 +67,10 @@ export interface HeavyTaskCompletionInput {
   error?: TaskRunError;
   heavyTaskMode?: HeavyTaskModeFacts;
   latestHeavyTaskTodos?: HeavyTaskTodoState;
+  latestHeavyTaskAcceptanceDag?: HeavyTaskAcceptanceDagState;
+  latestHeavyTaskAdversarialCheckPlan?: HeavyTaskAdversarialCheckPlanState;
+  latestHeavyTaskAdversarialCheckExecution?: HeavyTaskAdversarialCheckExecutionState;
+  includeAdversarialCheck?: boolean;
   latestHeavyTaskSelfCheckPlan?: HeavyTaskSelfCheckPlanState;
   latestHeavyTaskSelfCheck?: HeavyTaskSemanticSelfCheckState;
   decisions?: readonly AutonomousDecision[];
@@ -102,6 +111,7 @@ function runtimeStatusFromInput(input: HeavyTaskCompletionInput): HeavyTaskCompl
 function semanticStatusFromInput(input: HeavyTaskCompletionInput): HeavyTaskCompletionStatus['semantic'] {
   const selfCheck = input.latestHeavyTaskSelfCheck;
   const todos = input.latestHeavyTaskTodos;
+  const dag = input.latestHeavyTaskAcceptanceDag;
   const unresolvedTodoIds = unresolvedTodoIdsFrom(todos);
   const nonblockingTodoIds = nonblockingTodoIdsFrom(todos);
   const base = {
@@ -128,6 +138,19 @@ function semanticStatusFromInput(input: HeavyTaskCompletionInput): HeavyTaskComp
   if (strongPassBlocker) {
     return { ...base, status: 'incomplete', reason: strongPassBlocker };
   }
+  const dagBlocker = heavyTaskAcceptanceDagBlocker(dag);
+  if (dagBlocker) {
+    return { ...base, status: 'incomplete', reason: dagBlocker };
+  }
+  if (input.includeAdversarialCheck !== false) {
+    const adversarialBlocker = adversarialCheckBlocker({
+      plan: input.latestHeavyTaskAdversarialCheckPlan,
+      execution: input.latestHeavyTaskAdversarialCheckExecution,
+    });
+    if (adversarialBlocker) {
+      return { ...base, status: 'incomplete', reason: adversarialBlocker };
+    }
+  }
   if (!todos) {
     return { ...base, status: 'incomplete', reason: 'missing latest heavy-task todos' };
   }
@@ -148,7 +171,7 @@ function semanticStatusFromInput(input: HeavyTaskCompletionInput): HeavyTaskComp
   return {
     ...base,
     status: 'complete',
-    reason: 'accepted public self-check passed, todos are resolved/nonblocking, and early runnable/check phase gate is complete',
+    reason: 'accepted public self-check passed, adversarial subagent checks passed, acceptance DAG nodes are self-checked, todos are resolved/nonblocking, and early runnable/check phase gate is complete',
   };
 }
 

@@ -3,6 +3,9 @@ import { describe, test } from 'node:test';
 import { evaluateHeavyTaskSelfCheckGate } from '../heavy-task-self-check-gate.js';
 import type { Task } from '../contracts.js';
 import type {
+  HeavyTaskAdversarialCheckExecutionState,
+  HeavyTaskAdversarialCheckPlanState,
+  HeavyTaskAcceptanceDagState,
   HeavyTaskModeFacts,
   HeavyTaskSelfCheckPlanState,
   HeavyTaskSemanticSelfCheckState,
@@ -52,7 +55,7 @@ describe('heavy-task self-check gate', () => {
     const decision = evaluateHeavyTaskSelfCheckGate({
       task: polyglotTask,
       heavyTaskMode,
-      projection: projection(),
+      projection: projection(undefined, undefined, undefined, null),
     });
 
     assert.ok(!decision.checklist.some((check) => check.kind === 'required_artifact'));
@@ -100,6 +103,20 @@ describe('heavy-task self-check gate', () => {
 
     assert.equal(decision.action, 'allow_finalize');
     assert.equal(decision.action === 'allow_finalize' ? decision.selfCheckId : undefined, 'self-check-1');
+  });
+
+  test('pass self-check without an acceptance DAG stays blocked', () => {
+    const decision = evaluateHeavyTaskSelfCheckGate({
+      task,
+      heavyTaskMode,
+      projection: projection(selfCheck('pass', {
+        command: 'test -f /app/move.txt && test -f /app/report.jsonl',
+        refs: ['/app/move.txt', '/app/report.jsonl'],
+      }), plan(['/app/move.txt', '/app/report.jsonl']), undefined, null),
+    });
+
+    assert.equal(decision.action, 'repair_prompt');
+    assert.match(decision.reason, /missing accepted heavy-task acceptance DAG/);
   });
 
   test('pass self-check without a plan returns a plan diagnostic', () => {
@@ -212,8 +229,6 @@ describe('heavy-task self-check gate', () => {
           { path: '/app/polyglot/main.py', kind: 'symlink', symlinkTarget: 'main.py.c' },
         ]),
       ),
-      repairAttemptsUsed: 0,
-      maxRepairAttempts: 1,
     });
 
     assert.equal(decision.action, 'allow_finalize');
@@ -247,8 +262,6 @@ describe('heavy-task self-check gate', () => {
           { path: '/app/polyglot/cmain', kind: 'file' },
         ]),
       ),
-      repairAttemptsUsed: 0,
-      maxRepairAttempts: 1,
     });
 
     assert.equal(decision.action, 'repair_prompt');
@@ -291,17 +304,18 @@ describe('heavy-task self-check gate', () => {
     assert.match(decision.reason, /does not address visible required artifact contract/);
   });
 
-  test('after the bounded repair attempt, the gate allows official verifier to proceed', () => {
+  test('after a repair attempt, the gate still returns a repair prompt until satisfied', () => {
     const decision = evaluateHeavyTaskSelfCheckGate({
       task,
       heavyTaskMode,
       projection: projection(),
-      repairAttemptsUsed: 1,
-      maxRepairAttempts: 1,
+      repairAttempt: 2,
     });
 
-    assert.equal(decision.action, 'allow_official_verifier_after_bounded_attempt');
+    assert.equal(decision.action, 'repair_prompt');
     assert.match(decision.reason, /missing accepted public self-check/);
+    assert.equal(decision.attempt, 2);
+    assert.match(decision.prompt, /bounded by runtime step, tool-call, wall-clock, and harness timeouts/);
   });
 });
 
@@ -309,6 +323,7 @@ function projection(
   selfCheckState?: HeavyTaskSemanticSelfCheckState,
   planState?: HeavyTaskSelfCheckPlanState,
   observation?: HeavyTaskWorkspaceObservationState,
+  dagState: HeavyTaskAcceptanceDagState | null = acceptanceDag(),
 ) {
   const taskRunId = 'run-gate';
   const events: TaskEvent[] = [
@@ -332,6 +347,20 @@ function projection(
   if (planState) {
     events.push({ type: 'heavy_task_self_check_plan_recorded', id: 'e4-plan', taskRunId, ts: 4, plan: planState });
   }
+  if (dagState) {
+    events.push({ type: 'heavy_task_acceptance_dag_recorded', id: 'e4-dag', taskRunId, ts: 4, dag: dagState });
+  }
+  if (selfCheckState && planState && dagState) {
+    const adversarialPlan = acceptedAdversarialPlan(taskRunId);
+    events.push({ type: 'heavy_task_adversarial_check_plan_recorded', id: 'e4-adversarial-plan', taskRunId, ts: 4.1, plan: adversarialPlan });
+    events.push({
+      type: 'heavy_task_adversarial_check_execution_recorded',
+      id: 'e4-adversarial-execution',
+      taskRunId,
+      ts: 4.2,
+      execution: acceptedAdversarialExecution(taskRunId, adversarialPlan.planId),
+    });
+  }
   if (selfCheckState) {
     events.push({ type: 'heavy_task_self_check_recorded', id: 'e4', taskRunId, ts: 4, selfCheck: selfCheckState });
   }
@@ -339,6 +368,90 @@ function projection(
     events.push({ type: 'heavy_task_workspace_observation_recorded', id: 'e5-observation', taskRunId, ts: 5, observation });
   }
   return projectTaskRun(events, taskRunId);
+}
+
+function acceptedAdversarialPlan(taskRunId: string): HeavyTaskAdversarialCheckPlanState {
+  return {
+    schemaVersion: 1,
+    planId: 'adversarial-plan-1',
+    taskRunId,
+    ts: 4.1,
+    checks: [{
+      id: 'adversarial-required-artifacts',
+      description: 'Verify all visible required artifacts with public commands.',
+      command: 'test -f /app/move.txt && test -f /app/report.jsonl',
+      expectedOutcome: 'both visible required artifacts exist',
+      source: 'subagent_plan',
+    }],
+    suite: adversarialSuiteManifest(),
+    publicReason: 'adversarial plan is derived from visible task artifacts and public checks',
+    source: { kind: 'model_tool', toolCallId: 'tool-adversarial-plan' },
+  };
+}
+
+function acceptedAdversarialExecution(taskRunId: string, planId: string): HeavyTaskAdversarialCheckExecutionState {
+  return {
+    schemaVersion: 1,
+    executionId: 'adversarial-execution-1',
+    taskRunId,
+    ts: 4.2,
+    planId,
+    status: 'pass',
+    suite: {
+      root: adversarialSuiteManifest().root,
+      runnerPath: adversarialSuiteManifest().runnerPath,
+      rerunCommand: adversarialSuiteManifest().rerunCommand,
+    },
+    publicReason: 'adversarial subagent executed the public required-artifact checks successfully',
+    commandEvidence: [{ command: 'test -f /app/move.txt && test -f /app/report.jsonl', exitCode: 0, outputExcerpt: 'artifacts present', artifactRefs: ['/app/move.txt', '/app/report.jsonl'] }],
+    repairRecommendations: [],
+    source: { kind: 'model_tool', toolCallId: 'tool-adversarial-execution' },
+  };
+}
+
+function adversarialSuiteManifest() {
+  return {
+    root: '/tmp/maka-adversarial/required-artifacts',
+    planPath: '/tmp/maka-adversarial/required-artifacts/plan.json',
+    runnerPath: '/tmp/maka-adversarial/required-artifacts/run.sh',
+    rerunCommand: 'sh /tmp/maka-adversarial/required-artifacts/run.sh',
+    generatedPaths: [
+      '/tmp/maka-adversarial/required-artifacts/plan.json',
+      '/tmp/maka-adversarial/required-artifacts/run.sh',
+    ],
+    publicReason: 'test-duty adversarial subagent generated this public required-artifact suite.',
+  };
+}
+
+function acceptanceDag(): HeavyTaskAcceptanceDagState {
+  const checked = {
+    status: 'pass' as const,
+    publicReason: 'public DAG node check passed',
+    commandEvidence: [{ command: 'test -f /app/move.txt', exitCode: 0, outputExcerpt: 'artifact present', artifactRefs: ['/app/move.txt'] }],
+    artifactEvidence: [{ path: '/app/move.txt', kind: 'file' as const, exists: true }],
+  };
+  return {
+    schemaVersion: 1,
+    dagId: 'dag-1',
+    taskRunId: 'run-gate',
+    ts: 3.75,
+    summary: 'public acceptance DAG for gate test',
+    publicReason: 'derived from visible task requirements',
+    nodes: [
+      { id: 'requirements', kind: 'requirement', title: 'Extract public requirements', description: 'Use visible task text', status: 'completed', dependsOn: [], acceptanceCriteria: ['requirements are public'], required: true, selfCheck: checked },
+      { id: 'deliverable', kind: 'deliverable', title: 'Create /app/move.txt', description: 'Create final visible artifact', status: 'completed', dependsOn: ['requirements'], acceptanceCriteria: ['/app/move.txt exists'], required: true, selfCheck: checked },
+      { id: 'implementation', kind: 'implementation', title: 'Implement deliverable', description: 'Apply task work', status: 'completed', dependsOn: ['deliverable'], acceptanceCriteria: ['implementation completed'], required: true, selfCheck: checked },
+      { id: 'public-check', kind: 'public_check', title: 'Run public check', description: 'Check deliverables visibly', status: 'completed', dependsOn: ['implementation'], acceptanceCriteria: ['public command passes'], required: true, selfCheck: checked },
+      { id: 'final-audit', kind: 'final_audit', title: 'Audit final state', description: 'Review visible evidence', status: 'completed', dependsOn: ['public-check'], acceptanceCriteria: ['evidence covers required nodes'], required: true, selfCheck: checked },
+    ],
+    guard: {
+      status: 'accepted',
+      checkedAt: 3.75,
+      categories: [],
+      publicReason: 'Accepted as public, task-derived heavy-task acceptance DAG.',
+    },
+    source: { kind: 'model_tool', toolCallId: 'tool-dag' },
+  };
 }
 
 function workspaceObservation(entries: HeavyTaskWorkspaceObservationState['entries']): HeavyTaskWorkspaceObservationState {

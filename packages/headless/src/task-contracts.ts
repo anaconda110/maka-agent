@@ -422,6 +422,97 @@ export interface HeavyTaskSelfCheckPlanState {
   source: HeavyTaskProgressSource;
 }
 
+export type HeavyTaskAdversarialCheckStatus = 'pass' | 'fail' | 'inconclusive';
+
+export interface HeavyTaskAdversarialMustRunCheck {
+  id: string;
+  description: string;
+  command?: string;
+  expectedOutcome: string;
+  source: 'subagent_plan';
+}
+
+export interface HeavyTaskAdversarialSuiteManifest {
+  root: string;
+  planPath: string;
+  runnerPath: string;
+  rerunCommand: string;
+  generatedPaths: string[];
+  publicReason: string;
+}
+
+export interface HeavyTaskAdversarialCheckPlanState {
+  schemaVersion: 1;
+  planId: string;
+  taskRunId: string;
+  attemptId?: string;
+  ts: number;
+  checks: HeavyTaskAdversarialMustRunCheck[];
+  suite: HeavyTaskAdversarialSuiteManifest;
+  publicReason: string;
+  source: HeavyTaskProgressSource;
+}
+
+export interface HeavyTaskAdversarialCheckExecutionState {
+  schemaVersion: 1;
+  executionId: string;
+  taskRunId: string;
+  attemptId?: string;
+  ts: number;
+  planId: string;
+  status: HeavyTaskAdversarialCheckStatus;
+  suite: Pick<HeavyTaskAdversarialSuiteManifest, 'root' | 'runnerPath' | 'rerunCommand'>;
+  publicReason: string;
+  commandEvidence: HeavyTaskCommandEvidence[];
+  repairRecommendations: string[];
+  source: HeavyTaskProgressSource;
+}
+
+export type HeavyTaskAcceptanceDagNodeKind =
+  | 'requirement'
+  | 'deliverable'
+  | 'implementation'
+  | 'public_check'
+  | 'negative_check'
+  | 'invariance_check'
+  | 'final_audit'
+  | 'other';
+
+export type HeavyTaskAcceptanceDagNodeStatus = 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
+
+export interface HeavyTaskAcceptanceDagNodeSelfCheck {
+  status: HeavyTaskSelfCheckStatus;
+  publicReason: string;
+  commandEvidence: HeavyTaskCommandEvidence[];
+  artifactEvidence: HeavyTaskArtifactEvidence[];
+}
+
+export interface HeavyTaskAcceptanceDagNode {
+  id: string;
+  kind: HeavyTaskAcceptanceDagNodeKind;
+  title: string;
+  description: string;
+  status: HeavyTaskAcceptanceDagNodeStatus;
+  dependsOn: string[];
+  acceptanceCriteria: string[];
+  required: boolean;
+  evidence?: string;
+  selfCheck?: HeavyTaskAcceptanceDagNodeSelfCheck;
+}
+
+export interface HeavyTaskAcceptanceDagState {
+  schemaVersion: 1;
+  dagId: string;
+  taskRunId: string;
+  attemptId?: string;
+  ts: number;
+  summary: string;
+  nodes: HeavyTaskAcceptanceDagNode[];
+  publicReason: string;
+  guard: HeavyTaskSourceGuardResult & { status: 'accepted' };
+  source: HeavyTaskProgressSource;
+}
+
 export type HeavyTaskSelfCheckPlanAuditStatus = 'pass' | 'fail' | 'unknown';
 
 export type HeavyTaskSelfCheckPlanRiskFlag =
@@ -474,7 +565,7 @@ export interface HeavyTaskSemanticSelfCheckState {
 export interface HeavyTaskAcceptanceCheck {
   id: string;
   kind: 'required_artifact' | 'artifact_parse' | 'public_command' | 'fresh_context' | 'workspace_hygiene' | 'task_family_hint';
-  source: 'task_instruction' | 'task_metadata' | 'todo' | 'self_check_plan' | 'terminal_bench_hint' | 'generic_heavy_task';
+  source: 'task_instruction' | 'task_metadata' | 'todo' | 'self_check_plan' | 'acceptance_dag' | 'terminal_bench_hint' | 'generic_heavy_task';
   description: string;
   evidenceRequired: 'command' | 'artifact' | 'command_or_artifact';
   path?: string;
@@ -803,6 +894,21 @@ export interface HeavyTaskSelfCheckPlanRecordedEvent extends BaseTaskEvent {
   plan: HeavyTaskSelfCheckPlanState;
 }
 
+export interface HeavyTaskAdversarialCheckPlanRecordedEvent extends BaseTaskEvent {
+  type: 'heavy_task_adversarial_check_plan_recorded';
+  plan: HeavyTaskAdversarialCheckPlanState;
+}
+
+export interface HeavyTaskAdversarialCheckExecutionRecordedEvent extends BaseTaskEvent {
+  type: 'heavy_task_adversarial_check_execution_recorded';
+  execution: HeavyTaskAdversarialCheckExecutionState;
+}
+
+export interface HeavyTaskAcceptanceDagRecordedEvent extends BaseTaskEvent {
+  type: 'heavy_task_acceptance_dag_recorded';
+  dag: HeavyTaskAcceptanceDagState;
+}
+
 export interface HeavyTaskSelfCheckGateRecordedEvent extends BaseTaskEvent {
   type: 'heavy_task_self_check_gate_recorded';
   gate: HeavyTaskSelfCheckGateState;
@@ -945,7 +1051,10 @@ export type TaskEvent =
   | EconomyTaskModeRecordedEvent
   | HeavyTaskInventoryRecordedEvent
   | HeavyTaskTodosRecordedEvent
+  | HeavyTaskAcceptanceDagRecordedEvent
   | HeavyTaskSelfCheckPlanRecordedEvent
+  | HeavyTaskAdversarialCheckPlanRecordedEvent
+  | HeavyTaskAdversarialCheckExecutionRecordedEvent
   | HeavyTaskSelfCheckRecordedEvent
   | HeavyTaskSelfCheckGateRecordedEvent
   | HeavyTaskWorkspaceObservationRecordedEvent

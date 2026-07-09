@@ -43,6 +43,12 @@ export type {
   AutonomousResultTaxonomy,
   EnvNetworkSecretPolicy,
   FeedbackObservation,
+  HeavyTaskAdversarialCheckExecutionRecordedEvent,
+  HeavyTaskAdversarialCheckExecutionState,
+  HeavyTaskAdversarialCheckPlanRecordedEvent,
+  HeavyTaskAdversarialCheckPlanState,
+  HeavyTaskAdversarialCheckStatus,
+  HeavyTaskAdversarialMustRunCheck,
   HeavyTaskAcceptanceCheck,
   HeavyTaskCompactEvidenceEnvelope,
   HeavyTaskDiffSummary,
@@ -275,6 +281,20 @@ export {
   renderHeavyTaskProgressForPrompt,
 } from './heavy-task-progress.js';
 export type {
+  HeavyTaskAcceptanceDagRecorder,
+  HeavyTaskAcceptanceDagSubmitInput,
+} from './heavy-task-acceptance-dag.js';
+export {
+  buildHeavyTaskAcceptanceDagTools,
+  createHeavyTaskAcceptanceDagRecorder,
+  HEAVY_TASK_ACCEPTANCE_DAG_TOOL_NAMES,
+  heavyTaskAcceptanceDagBlocker,
+  heavyTaskAcceptanceDagSubmitSchema,
+  isAcceptedHeavyTaskAcceptanceDag,
+  renderHeavyTaskAcceptanceDagForPrompt,
+  validateHeavyTaskPublicAcceptanceDag,
+} from './heavy-task-acceptance-dag.js';
+export type {
   HeavyTaskPublicSelfCheckValidation,
   HeavyTaskSelfCheckPlanSubmitInput,
   HeavyTaskSelfCheckRecorder,
@@ -314,6 +334,11 @@ export {
   HEAVY_TASK_EVIDENCE_SCHEMA_VERSION,
   renderHeavyTaskEvidenceForPrompt,
 } from './heavy-task-evidence.js';
+export {
+  HEAVY_TASK_LEDGER_REPLAY_MAX_CHARS,
+  HEAVY_TASK_LEDGER_TOOL_NAMES,
+  renderHeavyTaskLedgerReplay,
+} from './task-ledger-bridge.js';
 export type {
   HeavyTaskCompletionInput,
   HeavyTaskCompletionStatus,

@@ -32,6 +32,7 @@ import type { InvocationResult } from '../invocation-context.js';
 import type { ActiveFullCompactBlock } from '../active-full-compact.js';
 import {
   AGENT_WORKSPACE_WORKTREE,
+  ADVERSARIAL_CHECK_AGENT_ID,
   IMPLEMENTATION_AGENT_ID,
   LOCAL_READ_AGENT_DEFINITION,
   LOCAL_READ_AGENT_ID,
@@ -3158,6 +3159,7 @@ describe('SessionManager permission mode updates', () => {
     expect(list.definitions.map((agent) => agent.id)).toEqual([
       LOCAL_READ_AGENT_ID,
       WEB_RESEARCH_AGENT_ID,
+      ADVERSARIAL_CHECK_AGENT_ID,
       IMPLEMENTATION_AGENT_ID,
     ]);
     expect(list.definitions[0]?.availability).toEqual({ status: 'available' });
@@ -3169,6 +3171,11 @@ describe('SessionManager permission mode updates', () => {
       missingTools: ['WebSearch'],
     });
     expect(list.definitions[2]?.availability).toEqual({
+      status: 'unavailable',
+      reason: 'missing_tools',
+      missingTools: ['Bash'],
+    });
+    expect(list.definitions[3]?.availability).toEqual({
       status: 'unavailable',
       reason: 'workspace_isolation_unavailable',
       workspace: AGENT_WORKSPACE_WORKTREE,

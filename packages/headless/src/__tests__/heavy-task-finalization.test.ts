@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { evaluateHeavyTaskCompletionStatus } from '../heavy-task-finalization.js';
 import type {
+  HeavyTaskAdversarialCheckExecutionState,
+  HeavyTaskAdversarialCheckPlanState,
+  HeavyTaskAcceptanceDagState,
   HeavyTaskModeFacts,
   HeavyTaskSelfCheckPlanState,
   HeavyTaskSemanticSelfCheckState,
@@ -25,6 +28,8 @@ describe('heavy-task finalization status', () => {
       status: 'budget_exhausted',
       taxonomy: 'budget_exhausted',
       heavyTaskMode,
+      latestHeavyTaskAcceptanceDag: acceptanceDag(),
+      ...adversarialEvidence(),
       latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
       latestHeavyTaskSelfCheck: selfCheck('pass'),
       latestHeavyTaskTodos: phaseGateTodos([{ id: 'edit', status: 'completed' }]),
@@ -44,6 +49,8 @@ describe('heavy-task finalization status', () => {
       status: 'incomplete',
       taxonomy: 'agent_incomplete',
       heavyTaskMode,
+      latestHeavyTaskAcceptanceDag: acceptanceDag(),
+      ...adversarialEvidence(),
       latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
       latestHeavyTaskSelfCheck: selfCheck('pass'),
       latestHeavyTaskTodos: phaseGateTodos([
@@ -56,6 +63,21 @@ describe('heavy-task finalization status', () => {
     assert.deepEqual(status.semantic.nonblockingTodoIds, ['optional-polish']);
     assert.deepEqual(status.semantic.unresolvedTodoIds, []);
     assert.equal(status.finalization.eligible, true);
+  });
+
+  test('requires a completed acceptance DAG with node self-checks', () => {
+    const status = evaluateHeavyTaskCompletionStatus({
+      status: 'budget_exhausted',
+      taxonomy: 'budget_exhausted',
+      heavyTaskMode,
+      latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
+      latestHeavyTaskSelfCheck: selfCheck('pass'),
+      latestHeavyTaskTodos: phaseGateTodos([{ id: 'edit', status: 'completed' }]),
+    });
+
+    assert.equal(status.semantic.status, 'incomplete');
+    assert.match(status.semantic.reason, /missing accepted heavy-task acceptance DAG/);
+    assert.equal(status.finalization.eligible, false);
   });
 
   test('requires accepted public pass self-check evidence', () => {
@@ -75,6 +97,7 @@ describe('heavy-task finalization status', () => {
         status: 'budget_exhausted',
         taxonomy: 'budget_exhausted',
         heavyTaskMode,
+        latestHeavyTaskAcceptanceDag: acceptanceDag(),
         latestHeavyTaskSelfCheck: item.selfCheck,
         latestHeavyTaskTodos: phaseGateTodos([{ id: 'edit', status: 'completed' }]),
       });
@@ -89,6 +112,7 @@ describe('heavy-task finalization status', () => {
       status: 'budget_exhausted',
       taxonomy: 'budget_exhausted',
       heavyTaskMode,
+      latestHeavyTaskAcceptanceDag: acceptanceDag(),
       latestHeavyTaskSelfCheck: selfCheck('pass', {
         executionHygiene: {
           sandbox: {
@@ -123,6 +147,7 @@ describe('heavy-task finalization status', () => {
       status: 'budget_exhausted',
       taxonomy: 'budget_exhausted',
       heavyTaskMode,
+      latestHeavyTaskAcceptanceDag: acceptanceDag(),
       latestHeavyTaskSelfCheck: selfCheck('pass', {
         executionHygiene: {
           scratchUsed: true,
@@ -165,6 +190,8 @@ describe('heavy-task finalization status', () => {
         status: 'budget_exhausted',
         taxonomy: 'budget_exhausted',
         heavyTaskMode,
+        latestHeavyTaskAcceptanceDag: acceptanceDag(),
+        ...adversarialEvidence(),
         latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
         latestHeavyTaskSelfCheck: selfCheck('pass'),
         latestHeavyTaskTodos: item.todos,
@@ -205,6 +232,8 @@ describe('heavy-task finalization status', () => {
         status: 'budget_exhausted',
         taxonomy: 'budget_exhausted',
         heavyTaskMode,
+        latestHeavyTaskAcceptanceDag: acceptanceDag(),
+        ...adversarialEvidence(),
         latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
         latestHeavyTaskSelfCheck: selfCheck('pass'),
         latestHeavyTaskTodos: item.todos,
@@ -243,6 +272,8 @@ describe('heavy-task finalization status', () => {
         error: item.errorClass || item.message ? { class: item.errorClass, message: item.message ?? item.errorClass ?? '' } : undefined,
         decisions: item.reason ? [{ id: `decision-${item.name}`, taskRunId: 'run-1', ts: 1, decision: 'stop', reason: item.reason }] : undefined,
         heavyTaskMode,
+        latestHeavyTaskAcceptanceDag: acceptanceDag(),
+        ...adversarialEvidence(),
         latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
         latestHeavyTaskSelfCheck: selfCheck('pass'),
         latestHeavyTaskTodos: phaseGateTodos([{ id: 'edit', status: 'completed' }]),
@@ -257,6 +288,8 @@ describe('heavy-task finalization status', () => {
       status: 'completed',
       taxonomy: 'verification_failed',
       heavyTaskMode,
+      latestHeavyTaskAcceptanceDag: acceptanceDag(),
+      ...adversarialEvidence(),
       latestHeavyTaskSelfCheckPlan: selfCheckPlan(),
       latestHeavyTaskSelfCheck: selfCheck('pass'),
       latestHeavyTaskTodos: phaseGateTodos([{ id: 'edit', status: 'completed' }]),
@@ -267,6 +300,62 @@ describe('heavy-task finalization status', () => {
     assert.equal(verifierFailure.finalization.eligible, false);
   });
 });
+
+function adversarialEvidence(): {
+  latestHeavyTaskAdversarialCheckPlan: HeavyTaskAdversarialCheckPlanState;
+  latestHeavyTaskAdversarialCheckExecution: HeavyTaskAdversarialCheckExecutionState;
+} {
+  const plan: HeavyTaskAdversarialCheckPlanState = {
+    schemaVersion: 1,
+    planId: 'adversarial-plan-1',
+    taskRunId: 'run-1',
+    ts: 1.75,
+    checks: [{
+      id: 'adversarial-public-invariance',
+      description: 'Run a public semantic invariance check against representative safe input.',
+      command: 'npm test -- --grep public-invariance',
+      expectedOutcome: 'command exits zero and preserves visible safe input semantics',
+      source: 'subagent_plan',
+    }],
+    suite: adversarialSuiteManifest(),
+    publicReason: 'adversarial plan is derived from visible task requirements and public artifacts.',
+    source: { kind: 'model_tool', toolCallId: 'tool-adversarial-plan' },
+  };
+  return {
+    latestHeavyTaskAdversarialCheckPlan: plan,
+    latestHeavyTaskAdversarialCheckExecution: {
+      schemaVersion: 1,
+      executionId: 'adversarial-execution-1',
+      taskRunId: 'run-1',
+      ts: 2,
+      planId: plan.planId,
+      status: 'pass',
+      suite: {
+        root: adversarialSuiteManifest().root,
+        runnerPath: adversarialSuiteManifest().runnerPath,
+        rerunCommand: adversarialSuiteManifest().rerunCommand,
+      },
+      publicReason: 'adversarial subagent executed the public must-run checks successfully.',
+      commandEvidence: [{ command: 'npm test -- --grep public-invariance', exitCode: 0, outputExcerpt: 'public invariance checks passed' }],
+      repairRecommendations: [],
+      source: { kind: 'model_tool', toolCallId: 'tool-adversarial-execution' },
+    },
+  };
+}
+
+function adversarialSuiteManifest() {
+  return {
+    root: '/tmp/maka-adversarial/public-invariance',
+    planPath: '/tmp/maka-adversarial/public-invariance/plan.json',
+    runnerPath: '/tmp/maka-adversarial/public-invariance/run.sh',
+    rerunCommand: 'sh /tmp/maka-adversarial/public-invariance/run.sh',
+    generatedPaths: [
+      '/tmp/maka-adversarial/public-invariance/plan.json',
+      '/tmp/maka-adversarial/public-invariance/run.sh',
+    ],
+    publicReason: 'test-duty adversarial subagent generated this public scratch suite and runner.',
+  };
+}
 
 function selfCheck(
   status: HeavyTaskSelfCheckStatus,
@@ -346,6 +435,37 @@ function selfCheckPlan(): HeavyTaskSelfCheckPlanState {
       publicReason: 'Accepted as public, task-derived advisory self-check plan.',
     },
     source: { kind: 'model_tool', toolCallId: 'tool-plan' },
+  };
+}
+
+function acceptanceDag(): HeavyTaskAcceptanceDagState {
+  const checked = {
+    status: 'pass' as const,
+    publicReason: 'public node check passed',
+    commandEvidence: [{ command: 'test -f build-output.log', exitCode: 0, outputExcerpt: 'artifact present' }],
+    artifactEvidence: [{ path: 'build-output.log', kind: 'log' as const, exists: true }],
+  };
+  return {
+    schemaVersion: 1,
+    dagId: 'dag-1',
+    taskRunId: 'run-1',
+    ts: 1.5,
+    summary: 'public acceptance DAG for unit test task',
+    publicReason: 'derived from visible task contract',
+    nodes: [
+      { id: 'requirements', kind: 'requirement', title: 'Extract visible requirements', description: 'Use public task text only', status: 'completed', dependsOn: [], acceptanceCriteria: ['requirements are listed'], required: true, selfCheck: checked },
+      { id: 'deliverable', kind: 'deliverable', title: 'Produce final artifact', description: 'Create visible deliverable', status: 'completed', dependsOn: ['requirements'], acceptanceCriteria: ['artifact exists'], required: true, selfCheck: checked },
+      { id: 'implementation', kind: 'implementation', title: 'Implement task', description: 'Apply public implementation work', status: 'completed', dependsOn: ['deliverable'], acceptanceCriteria: ['implementation is present'], required: true, selfCheck: checked },
+      { id: 'public-check', kind: 'public_check', title: 'Run public check', description: 'Run visible command', status: 'completed', dependsOn: ['implementation'], acceptanceCriteria: ['command exits zero'], required: true, selfCheck: checked },
+      { id: 'final-audit', kind: 'final_audit', title: 'Audit final state', description: 'Review public evidence', status: 'completed', dependsOn: ['public-check'], acceptanceCriteria: ['all required evidence is present'], required: true, selfCheck: checked },
+    ],
+    guard: {
+      status: 'accepted',
+      checkedAt: 1.5,
+      categories: [],
+      publicReason: 'Accepted as public, task-derived heavy-task acceptance DAG.',
+    },
+    source: { kind: 'model_tool', toolCallId: 'tool-dag' },
   };
 }
 

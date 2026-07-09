@@ -1,4 +1,7 @@
 import type { Config, Task } from './contracts.js';
+import type { TaskLedgerStore } from '@maka/core/task-ledger';
+import type { HeavyTaskAcceptanceDagRecorder } from './heavy-task-acceptance-dag.js';
+import type { HeavyTaskAdversarialCheckRecorder } from './heavy-task-adversarial-check.js';
 import type { HeavyTaskEvidenceRecorder } from './heavy-task-evidence.js';
 import type { HeavyTaskModeSelection } from './heavy-task-policy.js';
 import type { HeavyTaskProgressRecorder } from './heavy-task-progress.js';
@@ -164,10 +167,19 @@ export interface HeadlessBackendContext {
   heavyTaskMode?: HeavyTaskModeSelection;
   /** Present only when heavy-task mode is enabled for task-run backed tooling. */
   heavyTaskProgress?: HeavyTaskProgressRecorder;
+  /** Present only when heavy-task mode is enabled for acceptance DAG planning/check tooling. */
+  heavyTaskAcceptanceDag?: HeavyTaskAcceptanceDagRecorder;
+  /** Present only when heavy-task mode is enabled for adversarial subagent self-check tooling. */
+  heavyTaskAdversarialCheck?: HeavyTaskAdversarialCheckRecorder;
   /** Present only when heavy-task mode is enabled for advisory public self-check tooling. */
   heavyTaskSelfCheck?: HeavyTaskSelfCheckRecorder;
   /** Present only when heavy-task mode is enabled for compact public evidence capture. */
   heavyTaskEvidence?: HeavyTaskEvidenceRecorder;
+  /** Present only when heavy-task mode exposes the durable task ledger tools. */
+  taskLedger?: {
+    store: TaskLedgerStore;
+    replayMaxChars?: number;
+  };
 }
 
 export function validateRealBackendIsolation(isolation: RealBackendIsolation | undefined): void {

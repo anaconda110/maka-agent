@@ -204,6 +204,14 @@ export interface BackendFactoryContext {
    */
   systemPrompt?: string;
   tools?: readonly MakaTool[];
+  spawnChildAgent?: (input: {
+    parentRunId: string;
+    spec: AgentSpec;
+    prompt: string;
+    abortSignal: AbortSignal;
+  }) => Promise<unknown>;
+  listChildAgents?: () => Promise<unknown>;
+  readChildAgentOutput?: (input: { runId?: string; turnId?: string; maxEvents?: number }) => Promise<unknown>;
   recordRunTrace?: RunTraceRecorder;
   recordActiveFullCompactBlock?: (block: ActiveFullCompactBlock) => void;
   recordSemanticCompactBlock?: (block: SemanticCompactBlock) => void;

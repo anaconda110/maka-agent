@@ -3,11 +3,15 @@ import { join } from 'node:path';
 import type { ResultRecord } from './contracts.js';
 import { compactArtifactEvidence, compactSelfCheckEvidence } from './heavy-task-evidence.js';
 import { evaluateHeavyTaskCompletionStatus, type HeavyTaskCompletionStatus } from './heavy-task-finalization.js';
+import { isAcceptedHeavyTaskAcceptanceDag } from './heavy-task-acceptance-dag.js';
 import { isAcceptedHeavyTaskSelfCheck } from './heavy-task-self-check.js';
 import type {
   AutonomousDecision,
   FeedbackObservation,
+  HeavyTaskAcceptanceDagState,
   HeavyTaskCompactEvidenceEnvelope,
+  HeavyTaskAdversarialCheckExecutionState,
+  HeavyTaskAdversarialCheckPlanState,
   HeavyTaskSelfCheckPlanState,
   HeavyTaskSelfCheckGateState,
   HeavyTaskWorkspaceObservationState,
@@ -56,6 +60,12 @@ export interface TaskRunProjection extends TaskRun {
   latestHeavyTaskInventory?: HeavyTaskInventoryState;
   heavyTaskTodoStates: HeavyTaskTodoState[];
   latestHeavyTaskTodos?: HeavyTaskTodoState;
+  heavyTaskAcceptanceDags: HeavyTaskAcceptanceDagState[];
+  latestHeavyTaskAcceptanceDag?: HeavyTaskAcceptanceDagState;
+  heavyTaskAdversarialCheckPlans: HeavyTaskAdversarialCheckPlanState[];
+  latestHeavyTaskAdversarialCheckPlan?: HeavyTaskAdversarialCheckPlanState;
+  heavyTaskAdversarialCheckExecutions: HeavyTaskAdversarialCheckExecutionState[];
+  latestHeavyTaskAdversarialCheckExecution?: HeavyTaskAdversarialCheckExecutionState;
   heavyTaskSelfChecks: HeavyTaskSemanticSelfCheckState[];
   latestHeavyTaskSelfCheck?: HeavyTaskSemanticSelfCheckState;
   heavyTaskSelfCheckPlans: HeavyTaskSelfCheckPlanState[];
@@ -109,6 +119,9 @@ export function projectTaskRun(events: readonly TaskEvent[], taskRunId?: string)
     warnings: [],
     heavyTaskInventory: [],
     heavyTaskTodoStates: [],
+    heavyTaskAcceptanceDags: [],
+    heavyTaskAdversarialCheckPlans: [],
+    heavyTaskAdversarialCheckExecutions: [],
     heavyTaskSelfCheckPlans: [],
     heavyTaskSelfChecks: [],
     heavyTaskSelfCheckGates: [],
@@ -204,9 +217,25 @@ export function projectTaskRun(events: readonly TaskEvent[], taskRunId?: string)
         projection.heavyTaskTodoStates.push(event.todos);
         projection.latestHeavyTaskTodos = event.todos;
         break;
+      case 'heavy_task_acceptance_dag_recorded':
+        if (isAcceptedHeavyTaskAcceptanceDag(event.dag)) {
+          projection.heavyTaskAcceptanceDags.push(event.dag);
+          projection.latestHeavyTaskAcceptanceDag = event.dag;
+        } else {
+          projection.warnings.push(`ignored heavy-task acceptance DAG ${event.dag.dagId}: source guard did not accept public evidence`);
+        }
+        break;
       case 'heavy_task_self_check_plan_recorded':
         projection.heavyTaskSelfCheckPlans.push(event.plan);
         projection.latestHeavyTaskSelfCheckPlan = event.plan;
+        break;
+      case 'heavy_task_adversarial_check_plan_recorded':
+        projection.heavyTaskAdversarialCheckPlans.push(event.plan);
+        projection.latestHeavyTaskAdversarialCheckPlan = event.plan;
+        break;
+      case 'heavy_task_adversarial_check_execution_recorded':
+        projection.heavyTaskAdversarialCheckExecutions.push(event.execution);
+        projection.latestHeavyTaskAdversarialCheckExecution = event.execution;
         break;
       case 'heavy_task_self_check_recorded':
         if (isAcceptedHeavyTaskSelfCheck(event.selfCheck)) {
@@ -366,6 +395,9 @@ export function projectTaskRun(events: readonly TaskEvent[], taskRunId?: string)
       error: projection.error,
       heavyTaskMode: projection.heavyTaskMode,
       latestHeavyTaskTodos: projection.latestHeavyTaskTodos,
+      latestHeavyTaskAcceptanceDag: projection.latestHeavyTaskAcceptanceDag,
+      latestHeavyTaskAdversarialCheckPlan: projection.latestHeavyTaskAdversarialCheckPlan,
+      latestHeavyTaskAdversarialCheckExecution: projection.latestHeavyTaskAdversarialCheckExecution,
       latestHeavyTaskSelfCheckPlan: projection.latestHeavyTaskSelfCheckPlan,
       latestHeavyTaskSelfCheck: projection.latestHeavyTaskSelfCheck,
       decisions: projection.decisions,

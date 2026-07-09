@@ -1,4 +1,6 @@
 import type { Task } from './contracts.js';
+import { heavyTaskAcceptanceDagBlocker } from './heavy-task-acceptance-dag.js';
+import { adversarialCheckBlocker } from './heavy-task-adversarial-check.js';
 import { evaluateHeavyTaskCompletionStatus } from './heavy-task-finalization.js';
 import { heavyTaskSelfCheckStrongPassBlocker, isAcceptedHeavyTaskSelfCheck } from './heavy-task-self-check.js';
 import type { HeavyTaskModeSelection } from './heavy-task-policy.js';
@@ -13,15 +15,14 @@ import type { TaskRunProjection } from './task-run-store.js';
 
 export type HeavyTaskSelfCheckGateDecision =
   | { action: 'allow_finalize'; reason: string; checklist: HeavyTaskAcceptanceCheck[]; selfCheckId: string }
-  | { action: 'repair_prompt'; reason: string; checklist: HeavyTaskAcceptanceCheck[]; prompt: string; attempt: 1 }
-  | { action: 'allow_official_verifier_after_bounded_attempt'; reason: string; checklist: HeavyTaskAcceptanceCheck[] };
+  | { action: 'repair_prompt'; reason: string; checklist: HeavyTaskAcceptanceCheck[]; prompt: string; attempt: number };
 
 export interface HeavyTaskSelfCheckGateInput {
   task: Task;
   heavyTaskMode: HeavyTaskModeSelection;
   projection: TaskRunProjection;
-  repairAttemptsUsed?: number;
-  maxRepairAttempts?: number;
+  repairAttempt?: number;
+  includeAdversarialCheck?: boolean;
 }
 
 export function evaluateHeavyTaskSelfCheckGate(input: HeavyTaskSelfCheckGateInput): HeavyTaskSelfCheckGateDecision {
@@ -41,6 +42,10 @@ export function evaluateHeavyTaskSelfCheckGate(input: HeavyTaskSelfCheckGateInpu
     error: input.projection.error,
     heavyTaskMode: input.projection.heavyTaskMode ?? input.heavyTaskMode,
     latestHeavyTaskTodos: input.projection.latestHeavyTaskTodos,
+    latestHeavyTaskAcceptanceDag: input.projection.latestHeavyTaskAcceptanceDag,
+    latestHeavyTaskAdversarialCheckPlan: input.projection.latestHeavyTaskAdversarialCheckPlan,
+    latestHeavyTaskAdversarialCheckExecution: input.projection.latestHeavyTaskAdversarialCheckExecution,
+    includeAdversarialCheck: input.includeAdversarialCheck,
     latestHeavyTaskSelfCheckPlan: input.projection.latestHeavyTaskSelfCheckPlan,
     latestHeavyTaskSelfCheck: input.projection.latestHeavyTaskSelfCheck,
     decisions: input.projection.decisions,
@@ -49,8 +54,12 @@ export function evaluateHeavyTaskSelfCheckGate(input: HeavyTaskSelfCheckGateInpu
   const reason = gateBlockerReason(
     selfCheck,
     input.projection.latestHeavyTaskSelfCheckPlan,
+    input.projection.latestHeavyTaskAcceptanceDag,
+    input.includeAdversarialCheck === false ? undefined : input.projection.latestHeavyTaskAdversarialCheckPlan,
+    input.includeAdversarialCheck === false ? undefined : input.projection.latestHeavyTaskAdversarialCheckExecution,
     completion.semantic.reason,
     checklist,
+    input.includeAdversarialCheck === false,
   );
   if (!reason && completion.semantic.status === 'complete' && selfCheck) {
     return {
@@ -61,16 +70,8 @@ export function evaluateHeavyTaskSelfCheckGate(input: HeavyTaskSelfCheckGateInpu
     };
   }
 
-  const attemptsUsed = input.repairAttemptsUsed ?? 0;
-  const maxAttempts = input.maxRepairAttempts ?? 1;
   const blockedReason = reason ?? completion.semantic.reason;
-  if (attemptsUsed >= maxAttempts) {
-    return {
-      action: 'allow_official_verifier_after_bounded_attempt',
-      reason: blockedReason,
-      checklist,
-    };
-  }
+  const attempt = Math.max(1, input.repairAttempt ?? 1);
 
   return {
     action: 'repair_prompt',
@@ -80,25 +81,26 @@ export function evaluateHeavyTaskSelfCheckGate(input: HeavyTaskSelfCheckGateInpu
       reason: blockedReason,
       checklist,
       selfCheck,
+      acceptanceDag: input.projection.latestHeavyTaskAcceptanceDag,
+      adversarialPlan: input.projection.latestHeavyTaskAdversarialCheckPlan,
+      adversarialExecution: input.projection.latestHeavyTaskAdversarialCheckExecution,
       workspaceObservation: input.projection.latestHeavyTaskWorkspaceObservation,
-      attempt: attemptsUsed + 1,
-      maxAttempts,
+      attempt,
     }),
-    attempt: 1,
+    attempt,
   };
 }
 
 export function heavyTaskSelfCheckGateStateFromDecision(input: {
   decision: HeavyTaskSelfCheckGateDecision;
   attempt: number;
-  maxAttempts: number;
 }): HeavyTaskSelfCheckGateState {
   const base = {
     schemaVersion: 1 as const,
     action: input.decision.action,
     reason: input.decision.reason,
     attempt: input.attempt,
-    maxAttempts: input.maxAttempts,
+    maxAttempts: 0,
     checklist: input.decision.checklist,
   };
   if (input.decision.action === 'allow_finalize') {
@@ -112,7 +114,7 @@ export function heavyTaskSelfCheckGateStateFromDecision(input: {
 
 export function deriveHeavyTaskAcceptanceChecks(
   task: Task,
-  projection: Pick<TaskRunProjection, 'latestHeavyTaskTodos' | 'latestHeavyTaskSelfCheckPlan'> = {},
+  projection: Pick<TaskRunProjection, 'latestHeavyTaskTodos' | 'latestHeavyTaskSelfCheckPlan' | 'latestHeavyTaskAcceptanceDag'> = {},
 ): HeavyTaskAcceptanceCheck[] {
   const checks: HeavyTaskAcceptanceCheck[] = [];
   const seen = new Set<string>();
@@ -144,6 +146,17 @@ export function deriveHeavyTaskAcceptanceChecks(
       source: 'todo',
       description: `Current heavy-task todo ${item.id}: ${cleanOneLine(item.content, 160)}`,
       evidenceRequired: item.kind === 'runnable_artifact' ? 'command_or_artifact' : 'command',
+    });
+  }
+
+  for (const node of projection.latestHeavyTaskAcceptanceDag?.nodes ?? []) {
+    if (node.required === false) continue;
+    if (!['deliverable', 'public_check', 'negative_check', 'invariance_check', 'final_audit'].includes(node.kind)) continue;
+    add({
+      kind: node.kind === 'deliverable' ? 'required_artifact' : 'task_family_hint',
+      source: 'acceptance_dag',
+      description: `Acceptance DAG node ${node.id}: ${cleanOneLine(node.title, 160)}`,
+      evidenceRequired: node.kind === 'deliverable' ? 'command_or_artifact' : 'command',
     });
   }
 
@@ -189,14 +202,16 @@ export function renderHeavyTaskSelfCheckGatePrompt(input: {
   reason: string;
   checklist: readonly HeavyTaskAcceptanceCheck[];
   selfCheck?: HeavyTaskSemanticSelfCheckState;
+  acceptanceDag?: TaskRunProjection['latestHeavyTaskAcceptanceDag'];
+  adversarialPlan?: TaskRunProjection['latestHeavyTaskAdversarialCheckPlan'];
+  adversarialExecution?: TaskRunProjection['latestHeavyTaskAdversarialCheckExecution'];
   workspaceObservation?: HeavyTaskWorkspaceObservationState;
   attempt: number;
-  maxAttempts: number;
 }): string {
   const lines = [
     'Your previous completion is not accepted for heavy-task finalization yet.',
     `Gate reason: ${input.reason}`,
-    `Bounded repair/check attempt: ${input.attempt} of ${input.maxAttempts}.`,
+    `Repair/check loop attempt: ${input.attempt}. This loop is bounded by runtime step, tool-call, wall-clock, and harness timeouts, not by a fixed repair-attempt budget.`,
     '',
     'Public acceptance checklist:',
     ...input.checklist.map((check) => {
@@ -206,9 +221,11 @@ export function renderHeavyTaskSelfCheckGatePrompt(input: {
     }),
     '',
     latestSelfCheckSummary(input.selfCheck),
+    latestAcceptanceDagSummary(input.acceptanceDag),
+    latestAdversarialCheckSummary(input.adversarialPlan, input.adversarialExecution),
     ...latestWorkspaceObservationSummary(input.workspaceObservation),
     '',
-    'Required action: run public commands or artifact inspections in the current workspace or under /tmp/maka-self-check, repair only if those checks fail, then call self_check_submit with concrete command/artifact evidence, executionHygiene.sandbox, and executionHygiene.workspaceGuard.',
+    'Required action: repair the deliverable or self-check evidence based on the gate reason and any latest adversarial tester failure/recommendations above, then submit a fresh self_check_submit with concrete command/artifact evidence, executionHygiene.sandbox, and executionHygiene.workspaceGuard. Do not call agent_spawn for adversarial checking and do not submit adversarial_check_plan_submit or adversarial_check_execution_submit; the runtime self-check controller owns adversarial planning and reruns after each pass self_check_submit.',
     'Constraints: do not inspect hidden, private, evaluator, official verifier, or scorer-only material. Keep scratch outputs under /tmp/maka-self-check/... and clean or report any workspace side effects.',
   ];
   return lines.filter((line) => line !== undefined).join('\n');
@@ -217,8 +234,12 @@ export function renderHeavyTaskSelfCheckGatePrompt(input: {
 function gateBlockerReason(
   selfCheck: HeavyTaskSemanticSelfCheckState | undefined,
   plan: TaskRunProjection['latestHeavyTaskSelfCheckPlan'],
+  acceptanceDag: TaskRunProjection['latestHeavyTaskAcceptanceDag'],
+  adversarialPlan: TaskRunProjection['latestHeavyTaskAdversarialCheckPlan'],
+  adversarialExecution: TaskRunProjection['latestHeavyTaskAdversarialCheckExecution'],
   semanticReason: string,
   checklist: readonly HeavyTaskAcceptanceCheck[],
+  skipAdversarialCheck: boolean,
 ): string | undefined {
   if (!selfCheck) return 'missing accepted public self-check evidence';
   if (!isAcceptedHeavyTaskSelfCheck(selfCheck)) return 'latest self-check evidence was not accepted as public';
@@ -228,10 +249,16 @@ function gateBlockerReason(
   }
   const strongPassBlocker = heavyTaskSelfCheckStrongPassBlocker(selfCheck, plan);
   if (strongPassBlocker) return strongPassBlocker;
+  const dagBlocker = heavyTaskAcceptanceDagBlocker(acceptanceDag);
+  if (dagBlocker) return dagBlocker;
+  if (!skipAdversarialCheck) {
+    const adversarialBlocker = adversarialCheckBlocker({ plan: adversarialPlan, execution: adversarialExecution });
+    if (adversarialBlocker) return adversarialBlocker;
+  }
   if (!selfCheckAddressesRequiredArtifacts(selfCheck, checklist)) {
     return 'latest self-check does not address visible required artifact contract';
   }
-  if (semanticReason !== 'accepted public self-check passed, todos are resolved/nonblocking, and early runnable/check phase gate is complete') {
+  if (semanticReason !== 'accepted public self-check passed, adversarial subagent checks passed, acceptance DAG nodes are self-checked, todos are resolved/nonblocking, and early runnable/check phase gate is complete') {
     return semanticReason;
   }
   return undefined;
@@ -295,6 +322,46 @@ function latestSelfCheckSummary(selfCheck: HeavyTaskSemanticSelfCheckState | und
     ...commands.map((command) => `- command: ${command}`),
     ...artifacts.map((artifact) => `- artifact: ${artifact}`),
   ].join('\n');
+}
+
+function latestAcceptanceDagSummary(dag: TaskRunProjection['latestHeavyTaskAcceptanceDag']): string {
+  if (!dag) return 'Latest acceptance DAG summary: none accepted yet.';
+  const nodes = dag.nodes.slice(0, 12).map((node) => {
+    const selfCheckStatus = node.selfCheck?.status ?? 'missing';
+    return `- ${node.id} ${node.kind} ${node.status} self_check=${selfCheckStatus}: ${cleanOneLine(node.title, 140)}`;
+  });
+  return [
+    `Latest acceptance DAG summary: id=${dag.dagId}`,
+    `- summary: ${cleanOneLine(dag.summary, 240)}`,
+    ...nodes,
+    ...(dag.nodes.length > nodes.length ? [`- ... ${dag.nodes.length - nodes.length} more nodes omitted`] : []),
+  ].join('\n');
+}
+
+function latestAdversarialCheckSummary(
+  plan: TaskRunProjection['latestHeavyTaskAdversarialCheckPlan'],
+  execution: TaskRunProjection['latestHeavyTaskAdversarialCheckExecution'],
+): string {
+  const lines = ['Latest adversarial subagent check summary:'];
+  if (plan) {
+    lines.push(`- plan id=${plan.planId}; checks=${plan.checks.length}; reason=${cleanOneLine(plan.publicReason, 220)}`);
+    lines.push(`- suite root=${plan.suite.root}; runner=${plan.suite.runnerPath}; rerun=${plan.suite.rerunCommand}`);
+    for (const check of plan.checks.slice(0, 8)) {
+      lines.push(`  - ${check.id}: ${cleanOneLine(check.description, 140)}`);
+    }
+  } else {
+    lines.push('- plan: none accepted yet');
+  }
+  if (execution) {
+    lines.push(`- execution id=${execution.executionId}; status=${execution.status}; planId=${execution.planId}; reason=${cleanOneLine(execution.publicReason, 220)}`);
+    lines.push(`- execution rerun=${execution.suite.rerunCommand}`);
+    for (const repair of execution.repairRecommendations.slice(0, 6)) {
+      lines.push(`  - repair: ${cleanOneLine(repair, 140)}`);
+    }
+  } else {
+    lines.push('- execution: none accepted yet');
+  }
+  return lines.join('\n');
 }
 
 function latestWorkspaceObservationSummary(observation: HeavyTaskWorkspaceObservationState | undefined): string[] {

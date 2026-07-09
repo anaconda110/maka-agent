@@ -48,7 +48,7 @@ export function buildChildAgentTools(tools: readonly MakaTool[]): MakaTool[] {
   return out;
 }
 
-export function buildSubagentSpawnTool(): MakaTool<
+export function buildSubagentSpawnTool(options?: { permissionRequired?: boolean }): MakaTool<
   {
     profile: string;
     task: string;
@@ -87,7 +87,7 @@ export function buildSubagentSpawnTool(): MakaTool<
         });
       }
     }),
-    permissionRequired: true,
+    permissionRequired: options?.permissionRequired ?? true,
     categoryHint: 'subagent',
     impl: async (input, ctx) => {
       const definition = requireBuiltinAgentDefinitionByProfile(input.profile);

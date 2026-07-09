@@ -13,6 +13,9 @@ import {
   AGENT_WORKSPACE_WORKTREE,
   AGENT_WRITE_BACK_PATCH,
   AGENT_WRITE_BACK_SUMMARY,
+  ADVERSARIAL_CHECK_AGENT_DEFINITION,
+  ADVERSARIAL_CHECK_AGENT_ID,
+  ADVERSARIAL_CHECK_AGENT_PROFILE,
   IMPLEMENTATION_AGENT_ID,
   IMPLEMENTATION_AGENT_DEFINITION,
   IMPLEMENTATION_AGENT_PROFILE,
@@ -133,6 +136,7 @@ describe('subagent tools', () => {
     expect(withWebSearch.map((definition) => definition.profile)).toEqual([
       LOCAL_READ_AGENT_PROFILE,
       WEB_RESEARCH_AGENT_PROFILE,
+      ADVERSARIAL_CHECK_AGENT_PROFILE,
       IMPLEMENTATION_AGENT_PROFILE,
     ]);
     expect(withWebSearch.find((definition) => definition.id === WEB_RESEARCH_AGENT_ID)).toEqual({
@@ -172,6 +176,17 @@ describe('subagent tools', () => {
       parentPermissionMode: 'ask',
       requiredPermissionMode: 'execute',
     });
+  });
+
+  test('built-in catalog exposes adversarial-check with public read/search plus shell only', () => {
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.id).toBe(ADVERSARIAL_CHECK_AGENT_ID);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.profile).toBe(ADVERSARIAL_CHECK_AGENT_PROFILE);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.permissionMode).toBe('execute');
+    expect([...ADVERSARIAL_CHECK_AGENT_DEFINITION.tools]).toEqual(['Read', 'Glob', 'Grep', 'Bash']);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.tools.includes('Write')).toBe(false);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.tools.includes('Edit')).toBe(false);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.tools.includes('WebSearch')).toBe(false);
+    expect(ADVERSARIAL_CHECK_AGENT_DEFINITION.tools.includes(AGENT_SPAWN_TOOL_NAME)).toBe(false);
   });
 
   test('built-in catalog exposes implementation as a worktree-only fail-closed contract', async () => {
@@ -321,9 +336,9 @@ describe('subagent tools', () => {
       },
     ]);
 
-    expect(tools.map((tool) => tool.name)).toEqual(['Read', 'Glob', 'Grep', 'WebSearch']);
-    expect([...CHILD_AGENT_TOOL_NAMES]).toEqual(['Read', 'Glob', 'Grep', 'WebSearch']);
-    expect(tools.some((tool) => tool.name === 'Bash')).toBe(false);
+    expect(tools.map((tool) => tool.name)).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'Bash']);
+    expect([...CHILD_AGENT_TOOL_NAMES]).toEqual(['Read', 'Glob', 'Grep', 'WebSearch', 'Bash']);
+    expect(tools.some((tool) => tool.name === 'Bash')).toBe(true);
     expect(tools.some((tool) => tool.name === 'Write')).toBe(false);
     expect(tools.some((tool) => tool.name === 'Edit')).toBe(false);
   });
@@ -341,7 +356,7 @@ describe('subagent tools', () => {
       await runTool(runtime, tools, 'Grep', { pattern: 'SUBAGENT_CHILD_TOOL_MARKER' }, events);
 
       expect(events.some((event) => event.type === 'permission_request')).toBe(false);
-      expect(tools.has('Bash')).toBe(false);
+      expect(tools.has('Bash')).toBe(true);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -453,6 +468,7 @@ describe('subagent tools', () => {
 
     expect(schema.safeParse({ profile: LOCAL_READ_AGENT_PROFILE, task: 'Inspect the repo.' }).success).toBe(true);
     expect(schema.safeParse({ profile: WEB_RESEARCH_AGENT_PROFILE, task: 'Find current sources.' }).success).toBe(true);
+    expect(schema.safeParse({ profile: ADVERSARIAL_CHECK_AGENT_PROFILE, task: 'Create a public adversarial test plan.' }).success).toBe(true);
     expect(schema.safeParse({
       profile: IMPLEMENTATION_AGENT_PROFILE,
       task: 'Edit the repo.',

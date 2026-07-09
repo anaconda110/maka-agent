@@ -196,14 +196,16 @@ describe('isolated headless tools', () => {
     assert.ok(names.includes('agent_spawn'));
     assert.ok(names.includes('agent_list'));
     assert.ok(names.includes('agent_output'));
+    assert.equal(tool(tools, 'agent_spawn').permissionRequired, false);
     assert.ok(!names.includes('inventory_submit'));
     assert.ok(!names.includes('todo_update'));
+    assert.ok(!names.includes('acceptance_dag_submit'));
     assert.ok(!names.includes('self_check_plan_submit'));
     assert.ok(!names.includes('self_check_submit'));
     assert.ok(!names.some((name) => name.startsWith('task_')));
     assert.equal(names.filter((name) => name === 'Bash').length, 1);
-    assert.deepEqual(buildChildAgentTools(tools).map((tool) => tool.name), ['Read', 'Glob', 'Grep']);
-    assert.ok(!buildChildAgentTools(tools).some((tool) => ['Bash', 'Write', 'Edit'].includes(tool.name)));
+    assert.deepEqual(buildChildAgentTools(tools).map((tool) => tool.name), ['Read', 'Glob', 'Grep', 'Bash']);
+    assert.ok(!buildChildAgentTools(tools).some((tool) => ['Write', 'Edit', 'agent_spawn'].includes(tool.name)));
   });
 
   test('task experiment tools are included only when a task ledger store is enabled', () => {
@@ -250,6 +252,77 @@ describe('isolated headless tools', () => {
             ts: 1,
             items: input.items,
             source: { kind: 'model_tool', toolCallId: 'tool-1' },
+          };
+        },
+      },
+      heavyTaskAcceptanceDag: {
+        async acceptedDagForWorkBlocker() {
+          return undefined;
+        },
+        async recordAcceptanceDag(input) {
+          return {
+            accepted: true,
+            dag: {
+              schemaVersion: 1,
+              dagId: 'dag-1',
+              taskRunId: 'run-1',
+              ts: 1,
+              summary: input.summary,
+              nodes: input.nodes.map((node) => ({
+                ...node,
+                dependsOn: node.dependsOn ?? [],
+                required: node.required ?? true,
+                selfCheck: node.selfCheck ? {
+                  status: node.selfCheck.status,
+                  publicReason: node.selfCheck.publicReason,
+                  commandEvidence: node.selfCheck.commandEvidence ?? [],
+                  artifactEvidence: node.selfCheck.artifactEvidence ?? [],
+                } : undefined,
+              })),
+              publicReason: input.publicReason,
+              guard: {
+                status: 'accepted',
+                checkedAt: 1,
+                categories: [],
+                publicReason: 'Accepted as public, task-derived heavy-task acceptance DAG.',
+              },
+              source: { kind: 'model_tool', toolCallId: 'tool-1' },
+            },
+          };
+        },
+      },
+      heavyTaskAdversarialCheck: {
+        async recordPlan(input) {
+          return {
+            accepted: true,
+            plan: {
+              schemaVersion: 1,
+              planId: 'adversarial-plan-1',
+              taskRunId: 'run-1',
+              ts: 1,
+              checks: input.checks,
+              suite: input.suite,
+              publicReason: input.publicReason,
+              source: { kind: 'model_tool', toolCallId: 'tool-1' },
+            },
+          };
+        },
+        async recordExecution(input) {
+          return {
+            accepted: true,
+            execution: {
+              schemaVersion: 1,
+              executionId: 'adversarial-execution-1',
+              taskRunId: 'run-1',
+              ts: 1,
+              planId: input.planId,
+              status: input.status,
+              suite: input.suite,
+              publicReason: input.publicReason,
+              commandEvidence: input.commandEvidence,
+              repairRecommendations: input.repairRecommendations,
+              source: { kind: 'model_tool', toolCallId: 'tool-1' },
+            },
           };
         },
       },
@@ -304,10 +377,105 @@ describe('isolated headless tools', () => {
     const names = tools.map((tool) => tool.name);
     assert.ok(names.includes('inventory_submit'));
     assert.ok(names.includes('todo_update'));
+    assert.ok(names.includes('acceptance_dag_submit'));
+    assert.ok(names.includes('adversarial_check_plan_submit'));
+    assert.ok(names.includes('adversarial_check_execution_submit'));
     assert.ok(names.includes('self_check_plan_submit'));
     assert.ok(names.includes('self_check_submit'));
     assert.ok(!names.includes('engineering_record'));
     assert.ok(!names.includes('check_record'));
+  });
+
+  test('heavy-task DAG-first guard blocks Write, Edit, and non-inspection Bash before an accepted DAG', async () => {
+    const calls: unknown[] = [];
+    const tools = buildIsolatedHeadlessTools({
+      async exec(input) {
+        calls.push(input);
+        return { exitCode: 0, stdout: 'ran\n', stderr: '' };
+      },
+      async writeFile(input) {
+        calls.push(input);
+        return { ok: true, path: input.path, bytes: Buffer.byteLength(input.content, 'utf8') };
+      },
+    }, {
+      heavyTaskAcceptanceDag: missingDagRecorder(),
+    });
+    const ctx = toolCtx('/workspace');
+
+    const bash = await tool(tools, 'Bash').impl({ command: 'python3 solve.py' }, ctx) as {
+      status: string;
+      exitCode: number;
+      stderr: string;
+    };
+    const write = await tool(tools, 'Write').impl({ path: 'out.txt', content: 'payload' }, ctx) as {
+      ok: boolean;
+      error: string;
+    };
+    const edit = await tool(tools, 'Edit').impl({
+      path: 'out.txt',
+      old_string: 'old',
+      new_string: 'new',
+    }, ctx) as { ok: boolean; error: string };
+
+    assert.equal(bash.status, 'failed');
+    assert.equal(bash.exitCode, 126);
+    assert.match(bash.stderr, /DAG-first guard blocked Bash/);
+    assert.equal(write.ok, false);
+    assert.match(write.error, /DAG-first guard blocked Write/);
+    assert.equal(edit.ok, false);
+    assert.match(edit.error, /DAG-first guard blocked Edit/);
+    assert.deepEqual(calls, [], 'blocked tools must not reach the isolated executor');
+  });
+
+  test('heavy-task DAG-first guard allows minimal public inspection Bash before an accepted DAG', async () => {
+    const calls: unknown[] = [];
+    const tools = buildIsolatedHeadlessTools({
+      async exec(input) {
+        calls.push(input);
+        return { exitCode: 0, stdout: 'README.md\n', stderr: '' };
+      },
+    }, {
+      heavyTaskAcceptanceDag: missingDagRecorder(),
+    });
+
+    const result = await tool(tools, 'Bash').impl({
+      command: 'pwd; ls -la /workspace 2>/dev/null; command -v rg',
+    }, toolCtx('/workspace')) as { status: string; stdout: string };
+
+    assert.equal(result.status, 'completed');
+    assert.equal(result.stdout, 'README.md\n');
+    assert.deepEqual(calls, [{
+      command: 'pwd; ls -la /workspace 2>/dev/null; command -v rg',
+      cwd: '/workspace',
+      boundedTail: true,
+    }]);
+  });
+
+  test('heavy-task DAG-first guard allows mutating tools after an accepted DAG', async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const tools = buildIsolatedHeadlessTools({
+      async exec(input) {
+        calls.push({ name: 'Bash', input });
+        return { exitCode: 0, stdout: 'ok\n', stderr: '' };
+      },
+      async writeFile(input) {
+        calls.push({ name: 'Write', input });
+        return { ok: true, path: input.path, bytes: Buffer.byteLength(input.content, 'utf8') };
+      },
+    }, {
+      heavyTaskAcceptanceDag: acceptedDagRecorder(),
+    });
+    const ctx = toolCtx('/workspace');
+
+    const bash = await tool(tools, 'Bash').impl({ command: 'python3 solve.py' }, ctx) as { status: string };
+    const write = await tool(tools, 'Write').impl({ path: 'out.txt', content: 'payload' }, ctx) as { ok: boolean };
+
+    assert.equal(bash.status, 'completed');
+    assert.equal(write.ok, true);
+    assert.deepEqual(calls, [
+      { name: 'Bash', input: { command: 'python3 solve.py', cwd: '/workspace', boundedTail: true } },
+      { name: 'Write', input: { cwd: '/workspace', path: 'out.txt', content: 'payload' } },
+    ]);
   });
 
   test('Write, Glob, and Grep delegate to native isolated executor methods', async () => {
@@ -1149,7 +1317,7 @@ describe('isolated headless tools', () => {
     assert.ok(loaded.includes('agent_output'));
   });
 
-  test('standard isolated tool availability does not reintroduce agent tools into local-read children', () => {
+  test('standard isolated tool availability does not reintroduce agent tools into same-workspace children', () => {
     const parentTools = buildIsolatedHeadlessTools({
       async exec() {
         return { exitCode: 0, stdout: '', stderr: '' };
@@ -1162,7 +1330,7 @@ describe('isolated headless tools', () => {
       { name: 'invalid', description: 'invalid', parameters: {}, impl: () => ({}) },
     ).prepare([]);
 
-    assert.deepEqual([...plan.activeTools].sort(), ['Glob', 'Grep', 'Read']);
+    assert.deepEqual([...plan.activeTools].sort(), ['Bash', 'Glob', 'Grep', 'Read']);
     assert.equal(plan.prepareStep, undefined);
     assert.ok(!plan.activeTools.includes(LOAD_TOOLS_NAME));
     assert.ok(!plan.activeTools.includes('agent_spawn'));
@@ -1192,6 +1360,28 @@ function execBackedTools(env: NodeJS.ProcessEnv = process.env) {
       }
     },
   });
+}
+
+function missingDagRecorder() {
+  return {
+    async acceptedDagForWorkBlocker() {
+      return 'missing accepted heavy-task acceptance DAG';
+    },
+    async recordAcceptanceDag() {
+      throw new Error('not used in this test');
+    },
+  };
+}
+
+function acceptedDagRecorder() {
+  return {
+    async acceptedDagForWorkBlocker() {
+      return undefined;
+    },
+    async recordAcceptanceDag() {
+      throw new Error('not used in this test');
+    },
+  };
 }
 
 function tool(tools: ReturnType<typeof buildIsolatedHeadlessTools>, name: string) {

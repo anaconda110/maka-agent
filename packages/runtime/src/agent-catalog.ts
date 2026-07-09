@@ -10,11 +10,14 @@ export const LOCAL_READ_AGENT_ID = 'local-read';
 export const LOCAL_READ_AGENT_PROFILE = 'local_read';
 export const WEB_RESEARCH_AGENT_ID = 'web-research';
 export const WEB_RESEARCH_AGENT_PROFILE = 'web_research';
+export const ADVERSARIAL_CHECK_AGENT_ID = 'adversarial-check';
+export const ADVERSARIAL_CHECK_AGENT_PROFILE = 'adversarial_check';
 export const IMPLEMENTATION_AGENT_ID = 'implementation';
 export const IMPLEMENTATION_AGENT_PROFILE = 'implementation';
 export const BUILTIN_AGENT_PROFILES = [
   LOCAL_READ_AGENT_PROFILE,
   WEB_RESEARCH_AGENT_PROFILE,
+  ADVERSARIAL_CHECK_AGENT_PROFILE,
   IMPLEMENTATION_AGENT_PROFILE,
 ] as const;
 export const AGENT_INVOCATION_FOREGROUND = 'foreground';
@@ -147,6 +150,38 @@ export const WEB_RESEARCH_AGENT_DEFINITION: AgentDefinition = {
   ].join('\n'),
 };
 
+export const ADVERSARIAL_CHECK_AGENT_DEFINITION: AgentDefinition = {
+  id: ADVERSARIAL_CHECK_AGENT_ID,
+  profile: ADVERSARIAL_CHECK_AGENT_PROFILE,
+  name: 'Adversarial Check',
+  description: 'Public test-duty adversarial suite authoring and reruns with read/search plus shell in scratch.',
+  contract: {
+    capability: 'adversarial_check',
+    invocation: AGENT_INVOCATION_FOREGROUND,
+    context: AGENT_CONTEXT_ISOLATED,
+    workspace: AGENT_WORKSPACE_SAME_WORKSPACE,
+    defaultWriteBack: AGENT_WRITE_BACK_SUMMARY,
+    supportedWriteBack: [AGENT_WRITE_BACK_SUMMARY],
+  },
+  permissionMode: 'execute',
+  tools: ['Read', 'Glob', 'Grep', 'Bash'],
+  categoryPolicy: {
+    read: 'allow',
+    shell_unsafe: 'allow',
+  },
+  systemPrompt: [
+    'You are a foreground adversarial-check child agent with an explicit test-duty role.',
+    'You own the adversarial test suite: generate the first plan, materialize the test files/runner in scratch, and execute the runner yourself.',
+    'Use only the provided Read, Glob, Grep, and Bash tools.',
+    'If runtime adversarial record tools are provided, call them to submit the accepted plan and execution evidence.',
+    'Do not use write/edit tools, web, browser, or nested agent tools.',
+    'Use Bash only for public, task-local commands and scratch-directory tests.',
+    'Do not inspect hidden, private, evaluator, official verifier, or scorer-only material.',
+    'For the first planning turn, return concrete MUST_RUN checks, suite root, plan path, runner path, rerun command, generated paths, and initial pass/fail evidence.',
+    'For later execution turns, do not create a new plan; rerun the supplied suite command and return pass/fail evidence plus repair recommendations.',
+  ].join('\n'),
+};
+
 export const IMPLEMENTATION_AGENT_DEFINITION: AgentDefinition = {
   id: IMPLEMENTATION_AGENT_ID,
   profile: IMPLEMENTATION_AGENT_PROFILE,
@@ -179,6 +214,7 @@ export const IMPLEMENTATION_AGENT_DEFINITION: AgentDefinition = {
 export const BUILTIN_AGENT_DEFINITIONS: readonly AgentDefinition[] = [
   LOCAL_READ_AGENT_DEFINITION,
   WEB_RESEARCH_AGENT_DEFINITION,
+  ADVERSARIAL_CHECK_AGENT_DEFINITION,
   IMPLEMENTATION_AGENT_DEFINITION,
 ];
 

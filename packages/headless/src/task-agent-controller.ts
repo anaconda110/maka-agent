@@ -14,14 +14,21 @@ import {
   AiSdkFlow,
   BackendRegistry,
   RuntimeRunner,
+  assertAgentDefinitionRunnable,
+  buildChildAgentTools,
+  buildToolsForAgentDefinition,
+  requireBuiltinAgentDefinition,
   type AgentRunActiveSession,
   type InvocationResult,
+  type MakaTool,
+  type MakaToolContext,
   type SessionStore,
 } from '@maka/runtime';
 import {
   createAgentRunStore,
   createRuntimeEventStore,
   createSessionStore,
+  createTaskLedgerStore,
 } from '@maka/storage';
 import type { Config, ResultRecord, Task } from './contracts.js';
 import { registerFakeBackend } from './backends.js';
@@ -33,6 +40,17 @@ import {
   createHeavyTaskEvidenceRecorder,
   renderHeavyTaskEvidenceForPrompt,
 } from './heavy-task-evidence.js';
+import {
+  createHeavyTaskAcceptanceDagRecorder,
+  HEAVY_TASK_ACCEPTANCE_DAG_TOOL_NAMES,
+  renderHeavyTaskAcceptanceDagForPrompt,
+} from './heavy-task-acceptance-dag.js';
+import {
+  buildHeavyTaskAdversarialCheckTools,
+  createHeavyTaskAdversarialCheckRecorder,
+  renderHeavyTaskAdversarialCheckForPrompt,
+} from './heavy-task-adversarial-check.js';
+import { runHeavyTaskAdversarialSelfCheckCheckpoint } from './heavy-task-adversarial-orchestrator.js';
 import { configWithHeavyTaskPolicy, resolveHeavyTaskMode } from './heavy-task-policy.js';
 import { configWithEconomyTaskPolicy, resolveEconomyTaskMode } from './economy-task-policy.js';
 import {
@@ -43,6 +61,7 @@ import {
 import {
   createHeavyTaskSelfCheckRecorder,
   HEAVY_TASK_SELF_CHECK_TOOL_NAMES,
+  isAcceptedHeavyTaskSelfCheck,
   renderHeavyTaskSelfCheckForPrompt,
 } from './heavy-task-self-check.js';
 import {
@@ -57,6 +76,7 @@ import {
   toolExecutorIdentity,
   validateRealBackendIsolation,
 } from './isolation.js';
+import { buildIsolatedHeadlessTools } from './tools.js';
 import {
   commandResourceScope,
   hashNormalizedArgs,
@@ -93,6 +113,12 @@ import {
   type TaskRunStore,
 } from './task-run-store.js';
 import { taskDefinitionFromTask } from './task-run-adapter.js';
+import {
+  HEAVY_TASK_LEDGER_TOOL_NAMES,
+  renderHeavyTaskLedgerReplay,
+} from './task-ledger-bridge.js';
+
+const ADVERSARIAL_CHECK_AGENT_ID = 'adversarial-check';
 
 export interface RunTaskOnceDeps extends RunExperimentDeps {
   taskRunStore?: TaskRunStore;
@@ -161,15 +187,31 @@ export async function runTaskOnce(
   const effectiveConfig = configWithEconomyTaskPolicy(configAfterHeavy, economyTaskMode);
   const priorProjection = heavyTaskMode.enabled ? await taskRunStore.project(taskRunId) : undefined;
   const priorProgressPrompt = priorProjection ? renderHeavyTaskProgressForPrompt(priorProjection) : undefined;
+  const priorAcceptanceDagPrompt = priorProjection ? renderHeavyTaskAcceptanceDagForPrompt(priorProjection) : undefined;
+  const priorAdversarialCheckPrompt = priorProjection ? renderHeavyTaskAdversarialCheckForPrompt({
+    latestPlan: priorProjection.latestHeavyTaskAdversarialCheckPlan,
+    latestExecution: priorProjection.latestHeavyTaskAdversarialCheckExecution,
+  }) : undefined;
   const priorSelfCheckPrompt = priorProjection ? renderHeavyTaskSelfCheckForPrompt(priorProjection) : undefined;
   const priorEvidencePrompt = priorProjection ? renderHeavyTaskEvidenceForPrompt(priorProjection) : undefined;
+  const heavyTaskLedgerStore = heavyTaskMode.enabled ? createTaskLedgerStore(deps.storageRoot) : undefined;
+  const taskLedgerPrompt = heavyTaskLedgerStore ? renderHeavyTaskLedgerReplay([]) : undefined;
   const instruction = withOptionalStatePrompts(deps.instructionOverride ?? task.instruction, [
     priorProgressPrompt,
+    priorAcceptanceDagPrompt,
+    priorAdversarialCheckPrompt,
     priorSelfCheckPrompt,
     priorEvidencePrompt,
+    taskLedgerPrompt,
   ]);
   const heavyTaskProgress = heavyTaskMode.enabled
     ? createHeavyTaskProgressRecorder({ taskRunId, attemptId, store: taskRunStore, now, newId })
+    : undefined;
+  const heavyTaskAcceptanceDag = heavyTaskMode.enabled
+    ? createHeavyTaskAcceptanceDagRecorder({ taskRunId, attemptId, store: taskRunStore, now, newId })
+    : undefined;
+  const heavyTaskAdversarialCheck = heavyTaskMode.enabled
+    ? createHeavyTaskAdversarialCheckRecorder({ taskRunId, attemptId, store: taskRunStore, now, newId })
     : undefined;
   const heavyTaskSelfCheck = heavyTaskMode.enabled
     ? createHeavyTaskSelfCheckRecorder({ taskRunId, attemptId, store: taskRunStore, now, newId })
@@ -266,7 +308,11 @@ export async function runTaskOnce(
         taskRunId,
         attemptId,
         isolation: deps.realBackendIsolation,
-        toolNames: toolNamesForIdentity(Boolean(deps.realBackendIsolation?.toolExecutor), heavyTaskMode.enabled),
+        toolNames: toolNamesForIdentity(
+          Boolean(deps.realBackendIsolation?.toolExecutor),
+          heavyTaskMode.enabled,
+          Boolean(heavyTaskLedgerStore),
+        ),
       }),
     });
     const backends = new BackendRegistry();
@@ -278,8 +324,11 @@ export async function runTaskOnce(
       workspaceDir: agentWorkspaceDir,
       heavyTaskMode,
       ...(heavyTaskProgress ? { heavyTaskProgress } : {}),
+      ...(heavyTaskAcceptanceDag ? { heavyTaskAcceptanceDag } : {}),
+      ...(heavyTaskAdversarialCheck ? { heavyTaskAdversarialCheck } : {}),
       ...(heavyTaskSelfCheck ? { heavyTaskSelfCheck } : {}),
       ...(heavyTaskEvidence ? { heavyTaskEvidence } : {}),
+      ...(heavyTaskLedgerStore ? { taskLedger: { store: heavyTaskLedgerStore } } : {}),
       ...(backendNeedsIsolation(config.backend)
         ? { realBackendIsolation: deps.realBackendIsolation, toolExecutor: deps.realBackendIsolation?.toolExecutor }
         : {}),
@@ -294,7 +343,14 @@ export async function runTaskOnce(
       name: `task:${config.id}:${task.id}`,
     });
     const turnId = newId();
-    const active = createSingleRunActiveSession(backends, sessionStore, now, newId);
+    const childTools = deps.realBackendIsolation?.toolExecutor
+      ? buildChildAgentTools(buildIsolatedHeadlessTools(deps.realBackendIsolation.toolExecutor))
+      : [];
+    const active = createSingleRunActiveSession(backends, sessionStore, now, newId, {
+      childTools,
+      runStore: agentRunStore,
+      runtimeEventStore,
+    });
     const run = new AgentRun({
       sessionId: header.id,
       header,
@@ -370,42 +426,92 @@ export async function runTaskOnce(
     let runtimeSummary = summarizeRuntime(invocation, deps.realBackendIsolation);
     await appendRuntimeFeedback(taskRunStore, taskRunId, attemptId, now, newId, runtimeSummary);
     if (heavyTaskMode.enabled) {
-      let gateProjection = await taskRunStore.project(taskRunId);
-      await appendHeavyTaskWorkspaceObservation({
-        taskRunStore,
-        taskRunId,
-        projection: gateProjection,
-        executor: deps.realBackendIsolation?.toolExecutor,
-        cwd: agentWorkspaceDir,
-        now,
-        newId,
-      });
-      gateProjection = await taskRunStore.project(taskRunId);
-      const gateDecision = evaluateHeavyTaskSelfCheckGate({
-        task,
-        heavyTaskMode,
-        projection: gateProjection,
-        repairAttemptsUsed: 0,
-        maxRepairAttempts: 1,
-      });
-      await appendTaskEvent(taskRunStore, taskRunId, {
-        type: 'heavy_task_self_check_gate_recorded',
-        id: newId(),
-        taskRunId,
-        ts: now(),
-        gate: heavyTaskSelfCheckGateStateFromDecision({
-          decision: gateDecision,
-          attempt: gateDecision.action === 'repair_prompt' ? gateDecision.attempt : 0,
-          maxAttempts: 1,
-        }),
-      });
+      let repairLoopAttempt = 0;
+      let currentParentRunId = run.runId;
+      let currentParentTurnId = turnId;
+      while (true) {
+        let gateProjection = await taskRunStore.project(taskRunId);
+        if (invocation.status !== 'completed' && !hasAcceptedPassSelfCheck(gateProjection)) {
+          break;
+        }
+        await appendHeavyTaskWorkspaceObservation({
+          taskRunStore,
+          taskRunId,
+          projection: gateProjection,
+          executor: deps.realBackendIsolation?.toolExecutor,
+          cwd: agentWorkspaceDir,
+          now,
+          newId,
+        });
+        gateProjection = await taskRunStore.project(taskRunId);
 
-      if (gateDecision.action === 'repair_prompt') {
-        const repairActive = createSingleRunActiveSession(backends, sessionStore, now, newId);
+        const baseDecision = evaluateHeavyTaskSelfCheckGate({
+          task,
+          heavyTaskMode,
+          projection: gateProjection,
+          repairAttempt: repairLoopAttempt + 1,
+          includeAdversarialCheck: false,
+        });
+        let gateDecision = baseDecision;
+
+        if (baseDecision.action === 'allow_finalize') {
+          await runRuntimeAdversarialCheckpoint({
+            taskRunStore,
+            taskRunId,
+            attemptId,
+            task,
+            projection: gateProjection,
+            recorder: heavyTaskAdversarialCheck,
+            backends,
+            sessionStore,
+            header,
+            cwd: agentWorkspaceDir,
+            parentRunId: currentParentRunId,
+            parentTurnId: currentParentTurnId,
+            childTools,
+            runStore: agentRunStore,
+            runtimeEventStore,
+            now,
+            newId,
+          });
+          gateProjection = await taskRunStore.project(taskRunId);
+          gateDecision = evaluateHeavyTaskSelfCheckGate({
+            task,
+            heavyTaskMode,
+            projection: gateProjection,
+            repairAttempt: repairLoopAttempt + 1,
+          });
+        }
+
+        await appendTaskEvent(taskRunStore, taskRunId, {
+          type: 'heavy_task_self_check_gate_recorded',
+          id: newId(),
+          taskRunId,
+          ts: now(),
+          gate: heavyTaskSelfCheckGateStateFromDecision({
+            decision: gateDecision,
+            attempt: gateDecision.action === 'repair_prompt' ? gateDecision.attempt : 0,
+          }),
+        });
+
+        if (gateDecision.action === 'allow_finalize') {
+          if (repairLoopAttempt > 0) {
+            invocation = normalizeAcceptedRepairInvocation(invocation, gateProjection);
+          }
+          break;
+        }
+
+        repairLoopAttempt += 1;
+        const repairActive = createSingleRunActiveSession(backends, sessionStore, now, newId, {
+          childTools,
+          runStore: agentRunStore,
+          runtimeEventStore,
+        });
+        const repairTurnId = newId();
         const repairRun = new AgentRun({
           sessionId: header.id,
           header,
-          userInput: { turnId: newId(), text: gateDecision.prompt },
+          userInput: { turnId: repairTurnId, text: gateDecision.prompt },
           store: sessionStore,
           runStore: agentRunStore,
           runtimeEventStore,
@@ -455,36 +561,8 @@ export async function runTaskOnce(
         const repairSummary = summarizeRuntime(invocation, deps.realBackendIsolation);
         await appendRuntimeFeedback(taskRunStore, taskRunId, attemptId, now, newId, repairSummary);
         runtimeSummary = mergeRuntimeSummaries(runtimeSummary, repairSummary);
-
-        let boundedProjection = await taskRunStore.project(taskRunId);
-        await appendHeavyTaskWorkspaceObservation({
-          taskRunStore,
-          taskRunId,
-          projection: boundedProjection,
-          executor: deps.realBackendIsolation?.toolExecutor,
-          cwd: agentWorkspaceDir,
-          now,
-          newId,
-        });
-        boundedProjection = await taskRunStore.project(taskRunId);
-        const boundedDecision = evaluateHeavyTaskSelfCheckGate({
-          task,
-          heavyTaskMode,
-          projection: boundedProjection,
-          repairAttemptsUsed: 1,
-          maxRepairAttempts: 1,
-        });
-        await appendTaskEvent(taskRunStore, taskRunId, {
-          type: 'heavy_task_self_check_gate_recorded',
-          id: newId(),
-          taskRunId,
-          ts: now(),
-          gate: heavyTaskSelfCheckGateStateFromDecision({
-            decision: boundedDecision,
-            attempt: 1,
-            maxAttempts: 1,
-          }),
-        });
+        currentParentRunId = repairRun.runId;
+        currentParentTurnId = repairTurnId;
       }
     }
 
@@ -654,6 +732,150 @@ async function appendHeavyTaskWorkspaceObservation(input: {
   if (event) await appendTaskEvent(input.taskRunStore, input.taskRunId, event);
 }
 
+async function runRuntimeAdversarialCheckpoint(input: {
+  taskRunStore: TaskRunStore;
+  taskRunId: string;
+  attemptId: string;
+  task: Task;
+  projection: TaskRunProjection;
+  recorder?: ReturnType<typeof createHeavyTaskAdversarialCheckRecorder>;
+  backends: BackendRegistry;
+  sessionStore: SessionStore;
+  header: SessionHeader;
+  cwd: string;
+  parentRunId: string;
+  parentTurnId: string;
+  childTools: readonly MakaTool[];
+  runStore?: AgentRunStore;
+  runtimeEventStore?: RuntimeEventStore;
+  now: () => number;
+  newId: () => string;
+}): Promise<void> {
+  const recorder = input.recorder;
+  if (!recorder) return;
+  try {
+    await runHeavyTaskAdversarialSelfCheckCheckpoint({
+      task: input.task,
+      taskRunId: input.taskRunId,
+      attemptId: input.attemptId,
+      projection: input.projection,
+      recorder,
+      cwd: input.cwd,
+      sessionId: input.header.id,
+      runId: input.parentRunId,
+      turnId: input.parentTurnId,
+      now: input.now,
+      newId: input.newId,
+      spawnAdversarialChild: async (prompt, abortSignal) => {
+        const active = createSingleRunActiveSession(input.backends, input.sessionStore, input.now, input.newId, {
+          childTools: input.childTools,
+          ...(input.runStore ? { runStore: input.runStore } : {}),
+          ...(input.runtimeEventStore ? { runtimeEventStore: input.runtimeEventStore } : {}),
+        });
+        try {
+          return await active.spawnChildAgent(input.header.id, input.header, {
+            parentRunId: input.parentRunId,
+            spec: { id: ADVERSARIAL_CHECK_AGENT_ID },
+            prompt,
+            abortSignal,
+            extraTools: buildHeavyTaskAdversarialCheckTools(recorder),
+            summaryMaxChars: 120_000,
+          });
+        } finally {
+          await active.dispose();
+        }
+      },
+      runWorkspaceCommand: createRuntimeWorkspaceCommandRunner({
+        tools: input.childTools,
+        sessionId: input.header.id,
+        runId: input.parentRunId,
+        turnId: input.parentTurnId,
+        cwd: input.cwd,
+        newId: input.newId,
+      }),
+      getProjection: () => input.taskRunStore.project(input.taskRunId),
+    });
+  } catch (error) {
+    await appendTaskEvent(input.taskRunStore, input.taskRunId, {
+      type: 'feedback_observed',
+      id: input.newId(),
+      taskRunId: input.taskRunId,
+      ts: input.now(),
+      observation: {
+        id: input.newId(),
+        taskRunId: input.taskRunId,
+        attemptId: input.attemptId,
+        ts: input.now(),
+        source: 'runtime',
+        summary: 'runtime adversarial self-check checkpoint failed',
+        details: {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      },
+    });
+  }
+}
+
+function hasAcceptedPassSelfCheck(projection: TaskRunProjection): boolean {
+  const selfCheck = projection.latestHeavyTaskSelfCheck;
+  return Boolean(selfCheck && isAcceptedHeavyTaskSelfCheck(selfCheck) && selfCheck.status === 'pass');
+}
+
+function createRuntimeWorkspaceCommandRunner(input: {
+  tools: readonly MakaTool[];
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  cwd: string;
+  newId: () => string;
+}) {
+  const bash = input.tools.find((tool) => tool.name === 'Bash');
+  if (!bash) return undefined;
+  return async (
+    command: string,
+    options: { timeoutMs: number; abortSignal: AbortSignal },
+  ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> => {
+    const ctx: MakaToolContext = {
+      sessionId: input.sessionId,
+      runId: input.runId,
+      turnId: input.turnId,
+      cwd: input.cwd,
+      toolCallId: input.newId(),
+      abortSignal: options.abortSignal,
+      emitOutput: () => {},
+    };
+    try {
+      const result = await bash.impl({ command, timeout_ms: options.timeoutMs }, ctx);
+      return normalizeWorkspaceCommandResult(result);
+    } catch (error) {
+      return {
+        exitCode: errorExitCode(error),
+        stdout: errorOutput(error, 'stdout'),
+        stderr: errorOutput(error, 'stderr') || (error instanceof Error ? error.message : String(error)),
+      };
+    }
+  };
+}
+
+function normalizeWorkspaceCommandResult(result: unknown): { exitCode: number | null; stdout: string; stderr: string } {
+  if (!isRecord(result)) return { exitCode: null, stdout: '', stderr: '' };
+  return {
+    exitCode: typeof result.exitCode === 'number' ? result.exitCode : null,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+  };
+}
+
+function errorExitCode(error: unknown): number | null {
+  if (isRecord(error) && typeof error.code === 'number') return error.code;
+  if (isRecord(error) && typeof error.exitCode === 'number') return error.exitCode;
+  return null;
+}
+
+function errorOutput(error: unknown, key: 'stdout' | 'stderr'): string {
+  return isRecord(error) && typeof error[key] === 'string' ? error[key] : '';
+}
+
 const DEFAULT_INTERVENTION_POLICY: TaskInterventionPolicy = { mode: 'fail_closed' };
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -668,9 +890,16 @@ function withOptionalStatePrompts(instruction: string, prompts: readonly (string
   return next;
 }
 
-function toolNamesForIdentity(hasIsolatedExecutor: boolean, heavyTaskEnabled: boolean): string[] {
+function toolNamesForIdentity(hasIsolatedExecutor: boolean, heavyTaskEnabled: boolean, taskLedgerEnabled = false): string[] {
   const names = hasIsolatedExecutor ? [...ISOLATED_HEADLESS_TOOL_NAMES] : ['registered_backend'];
-  if (heavyTaskEnabled && hasIsolatedExecutor) names.push(...HEAVY_TASK_PROGRESS_TOOL_NAMES, ...HEAVY_TASK_SELF_CHECK_TOOL_NAMES);
+  if (heavyTaskEnabled && hasIsolatedExecutor) {
+    names.push(
+      ...HEAVY_TASK_PROGRESS_TOOL_NAMES,
+      ...HEAVY_TASK_ACCEPTANCE_DAG_TOOL_NAMES,
+      ...HEAVY_TASK_SELF_CHECK_TOOL_NAMES,
+    );
+  }
+  if (taskLedgerEnabled && hasIsolatedExecutor) names.push(...HEAVY_TASK_LEDGER_TOOL_NAMES);
   return names;
 }
 
@@ -941,24 +1170,187 @@ async function runRuntimeAttempt(input: RunRuntimeAttemptInput): Promise<Invocat
 }
 
 type AgentRunHooks = ConstructorParameters<typeof AgentRun>[0]['hooks'];
+type InternalChildAgentInput = {
+  parentRunId: string;
+  spec: { id: string };
+  prompt: string;
+  abortSignal: AbortSignal;
+  extraTools?: readonly MakaTool[];
+  summaryMaxChars?: number;
+};
 
 function createSingleRunActiveSession(
   backends: BackendRegistry,
   store: SessionStore,
   now: () => number,
   newId: () => string,
+  options: {
+    childTools?: readonly MakaTool[];
+    runStore?: AgentRunStore;
+    runtimeEventStore?: RuntimeEventStore;
+  } = {},
 ): {
   hooks: AgentRunHooks;
   bindRun(run: AgentRun): void;
+  spawnChildAgent(
+    sessionId: string,
+    header: SessionHeader,
+    input: InternalChildAgentInput,
+  ): Promise<unknown>;
   dispose(): Promise<void>;
 } {
   let boundRun: AgentRun | undefined;
   let active: AgentRunActiveSession | undefined;
+  const childActive = new Map<string, AgentRunActiveSession>();
   const bindRun = (run: AgentRun) => {
     boundRun = run;
   };
+  const ensureChildActive = async (
+    activeKey: string,
+    sessionId: string,
+    header: SessionHeader,
+    systemPrompt: string,
+    tools: readonly MakaTool[],
+    childRun: AgentRun,
+  ): Promise<AgentRunActiveSession> => {
+    const existing = childActive.get(activeKey);
+    if (existing) {
+      existing.cachedHeader = header;
+      return existing;
+    }
+    const backend = await backends.build(header.backend, {
+      sessionId,
+      workspaceRoot: header.workspaceRoot,
+      header,
+      store,
+      appendMessage: async () => {},
+      systemPrompt,
+      tools,
+      recordRunTrace: (event) => childRun.recordRunTrace(event),
+      recordActiveFullCompactBlock: (block) => childRun.recordActiveFullCompactBlock(block),
+      recordSemanticCompactBlock: (block) => childRun.recordSemanticCompactBlock(block),
+    });
+    const entry: AgentRunActiveSession = {
+      sessionId,
+      backend,
+      cachedHeader: header,
+      activeRuns: new Map(),
+      turnToRunId: new Map(),
+    };
+    childActive.set(activeKey, entry);
+    return entry;
+  };
+  const runChildAgent = async (
+    sessionId: string,
+    header: SessionHeader,
+    input: InternalChildAgentInput,
+  ): Promise<unknown> => {
+    const definition = requireBuiltinAgentDefinition(input.spec.id);
+    const availableChildTools = options.childTools ?? [];
+    assertAgentDefinitionRunnable({
+      parentPermissionMode: header.permissionMode,
+      definition,
+      tools: availableChildTools,
+    });
+    const childTools = appendExtraTools(
+      buildToolsForAgentDefinition(availableChildTools, definition),
+      input.extraTools,
+    );
+    const childHeader: SessionHeader = {
+      ...header,
+      permissionMode: definition.permissionMode,
+      connectionLocked: true,
+    };
+    const turnId = newId();
+    const startedAt = now();
+    const activeKey = `${sessionId}:${turnId}`;
+    let childRun: AgentRun;
+    childRun = new AgentRun({
+      sessionId,
+      header: childHeader,
+      userInput: {
+        turnId,
+        text: input.prompt,
+        parentRunId: input.parentRunId,
+        agentId: definition.id,
+        agentName: definition.name,
+      },
+      store,
+      ...(options.runStore ? { runStore: options.runStore } : {}),
+      ...(options.runtimeEventStore ? { runtimeEventStore: options.runtimeEventStore } : {}),
+      newId,
+      now,
+      recordSessionMessages: false,
+      hooks: {
+        ensureActive: (targetSessionId, nextHeader): Promise<AgentRunActiveSession> =>
+          ensureChildActive(activeKey, targetSessionId, nextHeader, definition.systemPrompt, childTools, childRun),
+        registerRun: (targetActive, run) => {
+          targetActive.activeRuns.set(run.runId, run);
+          targetActive.turnToRunId.set(run.turnId, run.runId);
+        },
+        unregisterRun: (targetActive, run) => {
+          targetActive.activeRuns.delete(run.runId);
+          if (targetActive.turnToRunId.get(run.turnId) === run.runId) {
+            targetActive.turnToRunId.delete(run.turnId);
+          }
+        },
+        updateHeader: async (_targetSessionId, patch) => ({ ...childHeader, ...patch }),
+        updateStatus: async () => {},
+        appendTurnState: async () => {},
+      },
+    });
+    if (input.abortSignal.aborted) childRun.stop('stop_button');
+    const onAbort = () => childRun.stop('stop_button');
+    input.abortSignal.addEventListener('abort', onAbort, { once: true });
+    let invocation: InvocationResult;
+    try {
+      const attempt = runRuntimeAttempt({
+        run: childRun,
+        header: childHeader,
+        instruction: input.prompt,
+        requireTerminalRuntimeEventWrite: Boolean(options.runtimeEventStore),
+        now,
+        newId,
+      });
+      void attempt.catch(() => {});
+      invocation = await Promise.race([
+        attempt,
+        new Promise<never>((_resolve, reject) => {
+          if (input.abortSignal.aborted) {
+            reject(new Error('Child agent aborted by parent runtime.'));
+            return;
+          }
+          input.abortSignal.addEventListener('abort', () => {
+            reject(new Error('Child agent aborted by parent runtime.'));
+          }, { once: true });
+        }),
+      ]);
+    } finally {
+      input.abortSignal.removeEventListener('abort', onAbort);
+      const child = childActive.get(activeKey);
+      childActive.delete(activeKey);
+      await child?.backend.dispose().catch(() => {});
+    }
+    const completedAt = now();
+    return {
+      agentId: definition.id,
+      agentName: definition.name,
+      turnId,
+      runId: invocation.runId,
+      status: invocation.status === 'completed' ? 'completed' : 'failed',
+      permissionMode: definition.permissionMode,
+      summary: summarizeChildInvocation(invocation, input.summaryMaxChars),
+      artifactIds: [],
+      startedAt,
+      completedAt,
+      durationMs: Math.max(0, completedAt - startedAt),
+      eventCount: invocation.events.length,
+      ...(invocation.failure?.class ? { failureClass: invocation.failure.class } : {}),
+    };
+  };
   return {
     bindRun,
+    spawnChildAgent: runChildAgent,
     hooks: {
       ensureActive: async (sessionId, header) => {
         if (active) {
@@ -970,6 +1362,7 @@ function createSingleRunActiveSession(
           workspaceRoot: header.workspaceRoot,
           header,
           store,
+          spawnChildAgent: (input) => runChildAgent(sessionId, header, input),
           recordRunTrace: (event) => boundRun?.recordRunTrace(event),
           recordActiveFullCompactBlock: (block) => boundRun?.recordActiveFullCompactBlock(block),
           recordSemanticCompactBlock: (block) => boundRun?.recordSemanticCompactBlock(block),
@@ -1021,9 +1414,36 @@ function createSingleRunActiveSession(
     dispose: async () => {
       const backend = active?.backend;
       active = undefined;
+      const childBackends = [...childActive.values()].map((entry) => entry.backend);
+      childActive.clear();
       if (backend) await backend.dispose().catch(() => {});
+      await Promise.all(childBackends.map((childBackend) => childBackend.dispose().catch(() => {})));
     },
   };
+}
+
+function appendExtraTools(tools: readonly MakaTool[], extraTools: readonly MakaTool[] | undefined): MakaTool[] {
+  if (!extraTools?.length) return [...tools];
+  const seen = new Set(tools.map((tool) => tool.name));
+  const out = [...tools];
+  for (const tool of extraTools) {
+    if (seen.has(tool.name)) continue;
+    seen.add(tool.name);
+    out.push(tool);
+  }
+  return out;
+}
+
+function summarizeChildInvocation(invocation: InvocationResult, maxChars = 4_000): string {
+  const text = invocation.events
+    .filter((event) => !event.partial && event.role === 'model' && event.content?.kind === 'text')
+    .map((event) => event.content?.kind === 'text' ? event.content.text.trim() : '')
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+  if (text) return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+  if (invocation.failure?.message) return invocation.failure.message;
+  return `Child agent finished with status ${invocation.status}.`;
 }
 
 function statusPatch(
@@ -1104,6 +1524,20 @@ function normalizeHeadlessInvocation(invocation: InvocationResult): InvocationRe
         ? `headless task run cannot satisfy permission request ${request.requestId}`
         : 'headless task run cannot satisfy an interactive permission request',
     },
+  };
+}
+
+function normalizeAcceptedRepairInvocation(
+  invocation: InvocationResult,
+  projection: TaskRunProjection,
+): InvocationResult {
+  if (invocation.status !== 'failed') return invocation;
+  const selfCheck = projection.latestHeavyTaskSelfCheck;
+  if (!selfCheck || selfCheck.status !== 'pass' || selfCheck.guard.status !== 'accepted') return invocation;
+  return {
+    ...invocation,
+    status: 'completed',
+    failure: undefined,
   };
 }
 

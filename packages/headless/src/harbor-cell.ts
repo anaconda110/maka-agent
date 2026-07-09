@@ -53,6 +53,7 @@ import {
   createInMemoryTaskLedgerExperimentStore,
   renderTaskLedgerExperimentReplay,
 } from './task-ledger-experiment.js';
+import { renderHeavyTaskLedgerReplay } from './task-ledger-bridge.js';
 
 export const HARBOR_CELL_OUTPUT_FILENAME = 'maka-cell-output.json';
 export const HARBOR_CELL_RUNTIME_EVENTS_FILENAME = 'runtime-events.jsonl';
@@ -638,8 +639,20 @@ export function buildAiSdkCellBackendRegistration(input: {
     if (!context.toolExecutor) {
       throw new Error('Harbor ai-sdk backend requires an isolated tool executor');
     }
-    registry.register('ai-sdk', (ctx) =>
-      new AiSdkBackend({
+    registry.register('ai-sdk', (ctx) => {
+      const tools = [...(ctx.tools ?? buildHarborCellAiSdkTools(context.toolExecutor!, {
+        ...(context.heavyTaskMode?.enabled ? { exposeAgentTools: false, exposeAdversarialCheckTools: false } : {}),
+        ...(context.heavyTaskEvidence ? { heavyTaskEvidence: context.heavyTaskEvidence } : {}),
+        ...(context.heavyTaskProgress ? { heavyTaskProgress: context.heavyTaskProgress } : {}),
+        ...(context.heavyTaskAcceptanceDag ? { heavyTaskAcceptanceDag: context.heavyTaskAcceptanceDag } : {}),
+        ...(context.heavyTaskAdversarialCheck ? { heavyTaskAdversarialCheck: context.heavyTaskAdversarialCheck } : {}),
+        ...(context.heavyTaskSelfCheck ? { heavyTaskSelfCheck: context.heavyTaskSelfCheck } : {}),
+        ...(context.taskLedger ? { taskLedger: { store: context.taskLedger.store } } : {}),
+        ...(taskLedgerExperimentStore && taskLedgerExperimentPolicy
+          ? { taskLedgerExperiment: { store: taskLedgerExperimentStore } }
+          : {}),
+      }))];
+      return new AiSdkBackend({
         sessionId: ctx.sessionId,
         header: { ...ctx.header, model: input.model },
         appendMessage: ctx.appendMessage ?? ((message) => ctx.store.appendMessage(ctx.sessionId, message)),
@@ -648,23 +661,24 @@ export function buildAiSdkCellBackendRegistration(input: {
         modelId: input.model,
         permissionEngine,
         modelFactory: getAIModel,
-        tools: buildHarborCellAiSdkTools(context.toolExecutor!, {
-          ...(context.heavyTaskEvidence ? { heavyTaskEvidence: context.heavyTaskEvidence } : {}),
-          ...(context.heavyTaskProgress ? { heavyTaskProgress: context.heavyTaskProgress } : {}),
-          ...(context.heavyTaskSelfCheck ? { heavyTaskSelfCheck: context.heavyTaskSelfCheck } : {}),
-          ...(taskLedgerExperimentStore && taskLedgerExperimentPolicy
-            ? { taskLedgerExperiment: { store: taskLedgerExperimentStore } }
-            : {}),
-        }),
+        tools,
         toolAvailability: buildIsolatedHeadlessToolAvailability(),
         providerOptions: buildProviderOptions(connection, input.model, ctx.header.thinkingLevel),
-        systemPrompt: harborCellSystemPrompt(context.config.systemPrompt),
-        ...(taskLedgerExperimentStore && taskLedgerExperimentPolicy
+        systemPrompt: harborCellSystemPrompt(ctx.systemPrompt ?? context.config.systemPrompt),
+        ...((context.taskLedger || (taskLedgerExperimentStore && taskLedgerExperimentPolicy))
           ? {
-              turnTailPrompt: async ({ sessionId }) =>
-                renderTaskLedgerExperimentReplay(await taskLedgerExperimentStore.list(sessionId), {
-                  maxChars: taskLedgerExperimentPolicy.replayMaxChars,
-                }),
+              turnTailPrompt: async ({ sessionId }) => joinPromptFragments([
+                context.taskLedger
+                  ? renderHeavyTaskLedgerReplay(await context.taskLedger.store.list(sessionId), {
+                      maxChars: context.taskLedger.replayMaxChars,
+                    })
+                  : undefined,
+                taskLedgerExperimentStore && taskLedgerExperimentPolicy
+                  ? renderTaskLedgerExperimentReplay(await taskLedgerExperimentStore.list(sessionId), {
+                      maxChars: taskLedgerExperimentPolicy.replayMaxChars,
+                    })
+                  : undefined,
+              ]),
             }
           : {}),
         lookupPricing,
@@ -675,9 +689,17 @@ export function buildAiSdkCellBackendRegistration(input: {
         recordRunTrace: ctx.recordRunTrace,
         recordActiveFullCompactBlock: ctx.recordActiveFullCompactBlock,
         recordSemanticCompactBlock: ctx.recordSemanticCompactBlock,
-      }),
-    );
+        spawnChildAgent: ctx.spawnChildAgent,
+        listChildAgents: ctx.listChildAgents,
+        readChildAgentOutput: ctx.readChildAgentOutput,
+      });
+    });
   };
+}
+
+function joinPromptFragments(fragments: readonly (string | undefined)[]): string | undefined {
+  const kept = fragments.filter((fragment): fragment is string => Boolean(fragment && fragment.trim().length > 0));
+  return kept.length > 0 ? kept.join('\n\n') : undefined;
 }
 
 export const buildHarborAiSdkBackendRegistration = buildAiSdkCellBackendRegistration;

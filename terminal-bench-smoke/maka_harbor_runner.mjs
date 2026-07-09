@@ -22,6 +22,7 @@ const {
   runAutonomousTask,
   runTaskOnce,
   writeTaskRunExport,
+  renderHeavyTaskLedgerReplay,
 } = headless;
 const {
   buildHarborCellAiSdkTools,
@@ -546,9 +547,12 @@ try {
     registerBackends: async (registry, context) => {
       if (!context.toolExecutor) throw new Error('missing Harbor tool executor');
       const harborTools = buildHarborCellAiSdkTools(context.toolExecutor, {
+        ...(context.heavyTaskMode.enabled ? { exposeAgentTools: false, exposeAdversarialCheckTools: false } : {}),
         ...(context.heavyTaskEvidence ? { heavyTaskEvidence: context.heavyTaskEvidence } : {}),
         ...(context.heavyTaskProgress ? { heavyTaskProgress: context.heavyTaskProgress } : {}),
+        ...(context.heavyTaskAcceptanceDag ? { heavyTaskAcceptanceDag: context.heavyTaskAcceptanceDag } : {}),
         ...(context.heavyTaskSelfCheck ? { heavyTaskSelfCheck: context.heavyTaskSelfCheck } : {}),
+        ...(context.taskLedger ? { taskLedger: { store: context.taskLedger.store } } : {}),
       });
       configuredToolNames.splice(0, configuredToolNames.length, ...harborTools.map((tool) => tool.name));
       registry.register('ai-sdk', (ctx) =>
@@ -565,9 +569,17 @@ try {
           permissionEngine,
           modelFactory: getAIModel,
           providerOptions: buildProviderOptions(connection, model),
-          tools: harborTools,
+          tools: ctx.tools ?? harborTools,
           toolAvailability: buildIsolatedHeadlessToolAvailability(),
-          systemPrompt: [
+          ...(context.taskLedger
+            ? {
+                turnTailPrompt: async ({ sessionId }) =>
+                  renderHeavyTaskLedgerReplay(await context.taskLedger.store.list(sessionId), {
+                    maxChars: context.taskLedger.replayMaxChars,
+                  }),
+              }
+            : {}),
+          systemPrompt: ctx.systemPrompt ?? [
             'You are Maka Runtime running a Terminal-Bench task.',
             context.config.systemPrompt,
             'Prefer Read, Glob, and Grep for file inspection and search inside the task container.',
@@ -612,6 +624,9 @@ try {
               process.stderr.write('\n[maka] model stream started\n');
             }
           },
+          spawnChildAgent: ctx.spawnChildAgent,
+          listChildAgents: ctx.listChildAgents,
+          readChildAgentOutput: ctx.readChildAgentOutput,
         }),
       );
     },
