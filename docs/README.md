@@ -15,6 +15,7 @@ This page is the authority map for Maka documentation. Code and contract tests r
 - [Desktop architecture](../apps/desktop/README.md)
 - [Renderer architecture](../apps/desktop/src/renderer/README.md)
 - [Headless usage and isolation](../packages/headless/README.md)
+- [Runtime package](../packages/runtime/README.md)
 - [UI package architecture](../packages/ui/README.md)
 - [Security policy](../SECURITY.md)
 
@@ -37,11 +38,7 @@ This page is the authority map for Maka documentation. Code and contract tests r
 ### Security and privacy
 
 - [Workspace privacy context](./workspace-privacy-context.md)
-- [Memory threat model](./memory-threat-model.md)
-- [Search service threat model](./search-service-threat-model.md)
-- [Voice threat model](./voice-threat-model.md)
-- [Sandbox direction and implementation status](./sandbox/agent-runtime-codex-sandbox-todo.md)
-- [Sandbox design background](./sandbox/agent-runtime-codex-sandbox-alignment.md)
+- [Runtime sandbox boundary](../packages/runtime/src/sandbox/README.md)
 
 ## Active proposals and design material
 
@@ -49,12 +46,12 @@ These documents include target-state design or work that is not fully implemente
 
 - [DeepSeek Reasonix cost runtime design](./deepseek-reasonix-cost-runtime-design.md)
 - [Heavy-task mainline system design](./heavy-task-mainline-system-design.md)
-- [Runtime v2 architecture evolution](./runtime-v2-architecture-evolution.md)
-- [Runtime v2 implementation notes](./runtime-v2-implementation-notes.md)
 
 ## Historical material
 
-- [Runtime kernel extraction](./runtime-kernel.md)
+- [Runtime kernel extraction](./archive/runtime-kernel.md)
+- [Runtime v2 architecture evolution](./archive/runtime-v2-architecture-evolution.md)
+- [Runtime v2 implementation notes](./archive/runtime-v2-implementation-notes.md)
 - [Documentation archive](./archive/README.md)
 
 ## Maintenance
