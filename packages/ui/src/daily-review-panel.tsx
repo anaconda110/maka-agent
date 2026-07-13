@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button as BaseButton } from '@base-ui/react/button';
 import { useMountedRef } from './use-mounted-ref.js';
 import { CalendarDays } from './icons.js';
 import { SettingsSelect } from './primitives/settings-select.js';
@@ -354,7 +355,7 @@ export function DailyReviewPanel(props: {
           </UiButton>
           <UiButton
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             className="maka-daily-review-quick-run min-w-[6rem]"
             onClick={() => void triggerManualRun('deep')}
@@ -461,7 +462,7 @@ export function DailyReviewPanel(props: {
           {props.onCopyMarkdown && (
               <UiButton
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="maka-daily-review-copy min-w-[4rem]"
                 onClick={() => void runDailyReviewAction('copy', async () => {
@@ -479,7 +480,7 @@ export function DailyReviewPanel(props: {
             {props.onAppendMarkdown && (
               <UiButton
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="maka-daily-review-append min-w-[5rem]"
                 onClick={() => void runDailyReviewAction('append', async () => {
@@ -497,7 +498,7 @@ export function DailyReviewPanel(props: {
             {props.onSaveMarkdown && (
               <UiButton
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="maka-daily-review-save min-w-[4rem]"
                 onClick={() => void runDailyReviewAction('save', async () => {
@@ -592,17 +593,11 @@ export function DailyReviewPanel(props: {
               <ul className="maka-daily-review-list" aria-label="活跃对话列表">
                 {visibleSummary.sessions.map((session) => (
                   <li key={session.id} className="maka-daily-review-list-item">
-                    {/* PR-DAILYREVIEW-SESSION-BUTTON-PRIMITIVE-0
-                        (round 6/30): the active-conversation row
-                        used a raw <button>. Routed through UiButton
-                        variant="quiet" so disabled-state styling +
-                        focus-visible + :active scale come from the
-                        shared button contract. Custom class still
-                        owns the in-row layout (name left, relative
-                        time right). */}
-                    <UiButton
+                    {/* Active-conversation rows are composite navigation
+                        controls. Their semantic row seam owns layout and state;
+                        they are not a shared Button size or variant. */}
+                    <BaseButton
                       type="button"
-                      variant="quiet"
                       className="maka-daily-review-session-button"
                       onClick={() => props.onSelectSession?.(session.id)}
                       disabled={!props.onSelectSession}
@@ -612,7 +607,7 @@ export function DailyReviewPanel(props: {
                         ts={session.lastMessageAt}
                         className="maka-daily-review-session-time"
                       />
-                    </UiButton>
+                    </BaseButton>
                     {session.lastMessagePreview && (
                       <span className="maka-daily-review-session-preview">
                         {session.lastMessagePreview}

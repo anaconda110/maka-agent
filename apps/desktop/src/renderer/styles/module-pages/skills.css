@@ -34,13 +34,6 @@
   box-shadow: 0 0 0 2px oklch(from var(--foreground) l c h / 0.055);
 }
 
-/* Detail round 6: the add CTA rides UiButton variant="default" untouched —
-   the former ghost re-skin here (hardcoded black-gradient pill) was a
-   theme-leak + radius-family violation. Only the icon/label gap remains. */
-.maka-skill-add-button {
-  gap: var(--space-1);
-}
-
 /* Skills page
    card mirrors the Plan shell: 1px hairline border + 6px radius + 4% lift +
    1px inner top highlight, with tight 4-6px internal gaps. */
@@ -248,15 +241,6 @@ color: oklch(from var(--brand-deep) 0.55 min(c, 0.015) h);
   gap: var(--space-1);
 }
 
-.maka-skill-filter-pill {
-  min-width: 0;
-  min-height: var(--h-control-sm);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-semibold);
-  padding: 0 var(--space-2-5);
-}
-
 .maka-skill-market {
   display: grid;
   gap: var(--space-3);
@@ -349,27 +333,6 @@ color: oklch(from var(--brand-deep) 0.55 min(c, 0.015) h);
   font-weight: var(--font-weight-semibold);
 }
 
-/* + install: quiet icon button anchored top-right of the card head; only
-   this element acts, keeping the card body an honest inert surface. */
-.maka-skill-market-install-button {
-  flex: 0 0 auto;
-  width: var(--h-control-sm);
-  min-width: var(--h-control-sm);
-  height: var(--h-control-sm);
-  padding: 0;
-  border: var(--border-width-hairline) solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--background);
-  color: var(--muted-foreground);
-  transition: background-color var(--duration-base) var(--ease-out-strong), color var(--duration-base) var(--ease-out-strong);
-}
-
-.maka-skill-market-card:hover .maka-skill-market-install-button:not(:disabled),
-.maka-skill-market-install-button:not(:disabled):hover {
-  background: var(--state-hover-bg);
-  color: var(--foreground);
-}
-
 .maka-skill-market-category {
   justify-self: start;
 }
@@ -406,21 +369,6 @@ color: oklch(from var(--brand-deep) 0.55 min(c, 0.015) h);
   justify-content: space-between;
   gap: var(--space-2);
   margin-top: auto;
-}
-
-.maka-skill-market-install {
-  /* Static 「即将上线」 tag (was a disabled 安装 button — dead
-     buttons promise interactivity; see the filter-pill precedent). */
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  border: var(--border-width-hairline) solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--foreground-2);
-  color: var(--muted-foreground);
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-semibold);
-  padding: 0 var(--space-2-5);
 }
 
 .maka-skill-examples,
@@ -670,28 +618,9 @@ color: oklch(from var(--brand-deep) 0.55 min(c, 0.015) h);
 
 .maka-skill-library-open-button {
   justify-self: end;
-  width: var(--maka-skill-library-action-size);
-  min-width: var(--maka-skill-library-action-size);
-  height: var(--maka-skill-library-action-size);
-  padding: 0;
-  border: var(--border-width-hairline) solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--background);
-  color: var(--muted-foreground);
-  transition: background-color var(--duration-base) var(--ease-out-strong), color var(--duration-base) var(--ease-out-strong);
-}
-
-.maka-skill-library-item:hover .maka-skill-library-open-button,
-.maka-skill-library-item:focus-within .maka-skill-library-open-button {
-  background: var(--state-hover-bg);
-  color: var(--foreground);
 }
 
 .maka-skill-library-runtime-switch {
-  justify-self: end;
-}
-
-.maka-skill-library-item > .maka-skill-market-install {
   justify-self: end;
 }
 
@@ -808,13 +737,6 @@ color: oklch(from var(--brand-deep) 0.55 min(c, 0.015) h);
     grid-column: 2;
     flex-wrap: wrap;
     white-space: normal;
-  }
-
-  .maka-skill-library-item > .maka-skill-market-install {
-    grid-column: 1 / -1;
-    justify-self: start;
-    margin-left: var(--space-3);
-    margin-bottom: var(--space-2-5);
   }
 
   .maka-skill-diff-grid {
