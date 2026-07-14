@@ -52,7 +52,7 @@ function renderCompactToolBlock(entry: MakaPiToolEntry, width: number): string[]
   // so any multi-line summary text would silently break the two-line card.
   const inputSummary = collapseToSingleLine(toolInputSummary(entry));
   const header = `${ansi.yellow('Tool')} ${entry.title ?? entry.toolName}`
-    + `${inputSummary ? ` ${ansi.dim(inputSummary)}` : ''} ${toolStatusText(entry)}`;
+    + ` ${toolStatusText(entry)}${inputSummary ? ` ${ansi.dim(inputSummary)}` : ''}`;
   const lines = [fitLine(header, width)];
   const summary = compactToolSummary(entry, width);
   if (summary) {
