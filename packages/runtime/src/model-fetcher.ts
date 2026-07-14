@@ -9,6 +9,10 @@ import { generalizedErrorMessage } from '@maka/core/redaction';
 import { proxiedFetch } from './bots/proxied-fetch.js';
 import { anthropicV1Url, googleApiUrl } from './provider-urls.js';
 import { claudeSubscriptionHeaders } from './subscription-auth.js';
+import {
+  GITHUB_COPILOT_API_VERSION,
+  GITHUB_COPILOT_COMPAT_HEADERS,
+} from './subscription-credentials.js';
 
 const MODEL_FETCH_TIMEOUT_MS = 10_000;
 
@@ -45,6 +49,30 @@ type RawCohereModel = {
   is_deprecated?: boolean;
   endpoints?: string[];
   context_length?: number;
+};
+
+type RawGitHubCopilotModel = {
+  id?: string;
+  name?: string;
+  model_picker_enabled?: boolean;
+  supported_endpoints?: string[];
+  policy?: { state?: string };
+  capabilities?: {
+    limits?: {
+      max_context_window_tokens?: number;
+      max_prompt_tokens?: number;
+      max_output_tokens?: number;
+      vision?: { supported_media_types?: string[] };
+    };
+    supports?: {
+      adaptive_thinking?: boolean;
+      max_thinking_budget?: number;
+      min_thinking_budget?: number;
+      reasoning_effort?: string[];
+      tool_calls?: boolean;
+      vision?: boolean;
+    };
+  };
 };
 
 type FireworksModelDiscovery = Extract<
@@ -85,6 +113,9 @@ async function fetchProviderModelsStrict(
   }
   if (discovery.kind === 'cohere') {
     return fetchCohereModels(baseUrl, apiKey);
+  }
+  if (discovery.auth === 'github-copilot') {
+    return fetchGitHubCopilotModels(baseUrl, apiKey);
   }
 
   switch (definition.protocol) {
@@ -137,6 +168,61 @@ async function fetchProviderModelsStrict(
     case 'cohere':
       throw new Error('Cohere requires native model discovery');
   }
+}
+
+export async function fetchGitHubCopilotModels(
+  baseUrl: string,
+  accessToken: string,
+  fetchFn?: typeof fetch,
+): Promise<ModelInfo[]> {
+  const response = await (fetchFn ?? proxiedFetch)(`${stripTrailing(baseUrl)}/models`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...GITHUB_COPILOT_COMPAT_HEADERS,
+      'Openai-Intent': 'conversation-edits',
+      'X-GitHub-Api-Version': GITHUB_COPILOT_API_VERSION,
+    },
+    ...(fetchFn ? { signal: AbortSignal.timeout(MODEL_FETCH_TIMEOUT_MS) } : { timeoutMs: MODEL_FETCH_TIMEOUT_MS }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json() as { data?: RawGitHubCopilotModel[] };
+  if (!Array.isArray(payload.data)) throw new Error('Invalid GitHub Copilot models response');
+  return payload.data.flatMap(toGitHubCopilotModelInfo);
+}
+
+function toGitHubCopilotModelInfo(model: RawGitHubCopilotModel): ModelInfo[] {
+  if (
+    !model.id
+    || model.model_picker_enabled !== true
+    || model.policy?.state === 'disabled'
+    || model.capabilities?.supports?.tool_calls !== true
+  ) return [];
+  const endpoints = model.supported_endpoints ?? [];
+  const apiProtocol = endpoints.includes('/v1/messages')
+    ? 'anthropic-messages' as const
+    : endpoints.includes('/responses')
+      ? 'openai-responses' as const
+      : endpoints.includes('/chat/completions')
+        ? 'openai-chat' as const
+        : null;
+  if (!apiProtocol) return [];
+  const limits = model.capabilities.limits;
+  const supports = model.capabilities.supports;
+  const reasoning = supports.adaptive_thinking === true
+    || (supports.reasoning_effort?.length ?? 0) > 0
+    || supports.max_thinking_budget !== undefined
+    || supports.min_thinking_budget !== undefined;
+  const vision = supports.vision === true
+    || limits?.vision?.supported_media_types?.some((type) => type.startsWith('image/')) === true;
+  const contextWindow = limits?.max_context_window_tokens ?? limits?.max_prompt_tokens;
+  return [{
+    id: model.id,
+    ...(model.name ? { displayName: model.name } : {}),
+    ...(typeof contextWindow === 'number' ? { contextWindow } : {}),
+    ...(typeof limits?.max_output_tokens === 'number' ? { maxOutputTokens: limits.max_output_tokens } : {}),
+    apiProtocol,
+    capabilities: { vision, reasoning, functionCalling: true },
+  }];
 }
 
 async function fetchCohereModels(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {

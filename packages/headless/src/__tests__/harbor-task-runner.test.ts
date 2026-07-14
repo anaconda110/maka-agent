@@ -47,6 +47,21 @@ function runInput(overrides: Partial<HarborTaskRunInput> = {}): HarborTaskRunInp
   };
 }
 
+function copilotModelsResponse(): Response {
+  return Response.json({
+    data: [{
+      id: 'gpt-5.4',
+      model_picker_enabled: true,
+      supported_endpoints: ['/responses'],
+      policy: { state: 'enabled' },
+      capabilities: {
+        limits: { max_prompt_tokens: 128_000, max_output_tokens: 16_000 },
+        supports: { tool_calls: true },
+      },
+    }],
+  });
+}
+
 interface FakeOptions {
   reward?: string;
   cell?: HarborCellOutput | null;
@@ -221,6 +236,83 @@ describe('createHarborTaskRunner', () => {
       assert.equal(harborEnv?.MAKA_HOST_API_KEY_ENV_NAME, 'DEEPSEEK_API_KEY');
       assert.equal(harborEnv?.MAKA_HOST_BASE_URL, 'https://api.deepseek.com');
       assert.deepEqual(config.tasks, [{ path: '/tasks/cobol-modernization', overwrite: false }]);
+    });
+  });
+
+  test('discovers the selected GitHub Copilot model on the host before a Harbor cell starts', async () => {
+    await withRun(async ({ jobsDir, repo, keyFile }) => {
+      await writeFile(keyFile, 'gho_account-token\n', 'utf8');
+      let harborEnv: Record<string, string> | undefined;
+      let discoveryAuthorization = '';
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'github-copilot/gpt-5.4',
+        provider: 'github-copilot',
+        apiKeyFile: keyFile,
+        copilotFetch: async (_url, init) => {
+          discoveryAuthorization = new Headers(init?.headers).get('authorization') ?? '';
+          return copilotModelsResponse();
+        },
+        runHarbor: async (request) => {
+          harborEnv = request.env;
+          return fakeRunner({ reward: '1\n' })(request);
+        },
+      });
+
+      await runner(runInput());
+
+      assert.equal(discoveryAuthorization, 'Bearer gho_account-token');
+      assert.equal(harborEnv?.MAKA_HOST_API_KEY, 'gho_account-token');
+      assert.equal(harborEnv?.MAKA_HOST_API_KEY_FILE, undefined);
+      assert.equal(harborEnv?.MAKA_HOST_API_KEY_ENV_NAME, 'COPILOT_GITHUB_TOKEN');
+      assert.equal(harborEnv?.MAKA_HOST_BASE_URL, 'https://api.githubcopilot.com');
+      assert.equal(harborEnv?.MAKA_HOST_MODEL_API_PROTOCOL, 'openai-responses');
+    });
+  });
+
+  test('consumes a Copilot GitHub token env on the host without copying it into the task container', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      let harborEnv: Record<string, string> | undefined;
+      const captured: { config?: Record<string, unknown> } = {};
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'github-copilot/gpt-5.4',
+        provider: 'github-copilot',
+        agentEnv: { GH_TOKEN: 'ghu_account-token' },
+        copilotFetch: async () => copilotModelsResponse(),
+        runHarbor: async (request) => {
+          harborEnv = request.env;
+          return fakeRunner({ reward: '1\n', captured })(request);
+        },
+      });
+
+      await runner(runInput());
+
+      assert.equal(harborEnv?.MAKA_HOST_API_KEY, 'ghu_account-token');
+      assert.equal(harborEnv?.MAKA_HOST_NO_AUTH, undefined);
+      assert.equal(harborEnv?.MAKA_HOST_MODEL_API_PROTOCOL, 'openai-responses');
+      assert.doesNotMatch(JSON.stringify(captured.config), /GH_TOKEN|ghu_account-token/);
+    });
+  });
+
+  test('rejects the unsupported OpenCode Harbor route before creating a Copilot auth proxy', async () => {
+    await withRun(async ({ jobsDir, repo, keyFile }) => {
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        agent: 'opencode',
+        model: 'github-copilot/gpt-5.4',
+        provider: 'github-copilot',
+        apiKeyFile: keyFile,
+      });
+
+      await assert.rejects(runner(runInput()), (error: unknown) => {
+        assert.ok(error instanceof HarborInfraError);
+        assert.match(error.detail ?? '', /OpenCode Harbor adapter does not support this provider/);
+        return true;
+      });
     });
   });
 

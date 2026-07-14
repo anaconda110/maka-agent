@@ -193,6 +193,27 @@ describe('getAIModel: models.dev registry providers', () => {
       assert.equal(model.modelId, modelId);
     }
   });
+
+  test('routes each exact GitHub Copilot model through its account-advertised wire', () => {
+    for (const [modelId, apiProtocol, expectedProvider] of [
+      ['gpt-5.4', 'openai-responses', 'openai.responses'],
+      ['claude-sonnet-4.6', 'anthropic-messages', 'anthropic.messages'],
+      ['gemini-3.1-pro-preview', 'openai-chat', 'github-copilot.chat'],
+    ] as const) {
+      const model = getAIModel({
+        connection: {
+          ...conn('github-copilot'),
+          models: [{ id: modelId, apiProtocol }],
+        },
+        apiKey: 'github-account-token',
+        modelId,
+        fetch: async () => Response.json({}),
+      });
+
+      assert.equal(model.provider, expectedProvider);
+      assert.equal(model.modelId, modelId);
+    }
+  });
 });
 
 describe('buildProviderOptions: openai-compatible namespace', () => {

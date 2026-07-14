@@ -343,6 +343,9 @@ export {
   parseOAuthSubscriptionTokens,
   resolveOAuthSubscriptionAccessToken,
   resolveOAuthSubscriptionTokens,
+  createGitHubCopilotAccountTokens,
+  GITHUB_COPILOT_DEFAULT_API_ENDPOINT,
+  isSupportedGitHubCopilotAccountToken,
   serializeOAuthSubscriptionTokens,
 } from './subscription-credentials.js';
 export type {
@@ -501,7 +504,7 @@ export type {
   SemanticCompactSummaryRequest,
 } from './semantic-compact.js';
 export { testConnection } from './test-connection.js';
-export { fetchProviderModels } from './model-fetcher.js';
+export { fetchGitHubCopilotModels, fetchProviderModels } from './model-fetcher.js';
 
 export {
   materializeSession,
