@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useMountedRef } from './use-mounted-ref.js';
-import { ArrowUp, Check, ChevronDown, FileEdit, FolderOpen, GitBranch, History, Plus } from './icons.js';
+import { ArrowUp, Blocks, Check, ChevronDown, FileEdit, FolderOpen, GitBranch, History, Paperclip, Plus } from './icons.js';
 import { ChatModelSwitcher, ModelChipStatic, NewChatModelPicker } from './chat-model-switcher.js';
 import { type UiLocale, detectUiLocale } from './locale-helpers.js';
 import { type ChatModelChoice, modelChoiceValue } from './chat-model-helpers.js';
@@ -43,7 +43,7 @@ import { Textarea as UiTextarea } from './primitives/textarea.js';
 import { AttachmentFileCard } from './attachment-file-card.js';
 import { Kbd } from './primitives/kbd.js';
 import { PermissionModeSelect } from './permission-mode-menu.js';
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './primitives/menu.js';
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuSub, MenuSubPopup, MenuSubTrigger, MenuTrigger } from './primitives/menu.js';
 
 const COMPOSER_MAX_HEIGHT = 240;
 
@@ -157,6 +157,10 @@ export const Composer = forwardRef<
     onAttachFilePaths?(files: File[]): void | Promise<void>;
     pendingAttachments?: readonly { displayName: string; kind: AttachmentRef['kind']; mimeType?: string; size: number }[];
     onRemoveAttachment?(index: number): void;
+    /** Built-in expert teams offered under 专家团 in the "+" menu. */
+    expertTeams?: readonly { id: string; name: string; description?: string }[];
+    /** Start a new expert-team session from the "+" menu. */
+    onStartExpertTeam?(teamId: string): void;
     modelLabel?: string;
     activeSession?: SessionSummary;
     activeConnectionLabel?: string;
@@ -816,20 +820,54 @@ export const Composer = forwardRef<
         )}
         <div className="maka-composer-toolbar composerActions" data-streaming={props.streaming ? 'true' : undefined}>
           <div className="maka-composer-left-controls">
-            {!props.streaming && props.onPickAttachments ? (
-              <UiButton
-                variant="quiet"
-                size="icon-sm"
-                type="button"
-                disabled={props.disabled || importActionBusy}
-                onClick={() => void runImportAction('pick', props.onPickAttachments)}
-                aria-label={pendingImportAction === 'pick' ? '正在添加附件' : '添加附件'}
-                aria-busy={pendingImportAction === 'pick' ? 'true' : undefined}
-                data-pending={pendingImportAction === 'pick' ? 'true' : undefined}
-                title="添加附件"
-              >
-                <Plus size={15} aria-hidden="true" />
-              </UiButton>
+            {!props.streaming && (props.onPickAttachments || (props.expertTeams?.length ?? 0) > 0) ? (
+              <Menu>
+                <MenuTrigger
+                  render={({ onClick: menuToggleClick, ...triggerRest }) => (
+                    <UiButton
+                      {...triggerRest}
+                      variant="quiet"
+                      size="icon-sm"
+                      type="button"
+                      disabled={props.disabled || importActionBusy}
+                      onClick={(e) => { menuToggleClick?.(e); }}
+                      aria-label={pendingImportAction === 'pick' ? '正在添加附件' : '添加'}
+                      aria-busy={importActionBusy ? 'true' : undefined}
+                      data-pending={importActionBusy ? 'true' : undefined}
+                      title="添加文件、专家团…"
+                    >
+                      <Plus size={15} aria-hidden="true" />
+                    </UiButton>
+                  )}
+                />
+                <MenuPopup className="maka-composer-context-menu" align="start" side="top" sideOffset={6}>
+                  {props.onPickAttachments ? (
+                    <MenuItem onClick={() => void runImportAction('pick', props.onPickAttachments)}>
+                      <Paperclip size={13} aria-hidden="true" />
+                      <span>添加文件或目录</span>
+                    </MenuItem>
+                  ) : null}
+                  {(props.expertTeams?.length ?? 0) > 0 ? (
+                    <MenuSub>
+                      <MenuSubTrigger>
+                        <Blocks size={13} aria-hidden="true" />
+                        <span>专家团</span>
+                      </MenuSubTrigger>
+                      <MenuSubPopup>
+                        {props.expertTeams?.map((team) => (
+                          <MenuItem
+                            key={team.id}
+                            onClick={() => props.onStartExpertTeam?.(team.id)}
+                            {...(team.description ? { title: team.description } : {})}
+                          >
+                            <span>{team.name}</span>
+                          </MenuItem>
+                        ))}
+                      </MenuSubPopup>
+                    </MenuSub>
+                  ) : null}
+                </MenuPopup>
+              </Menu>
             ) : null}
             {/* PR-MOVE-PERMISSION-MODE: the static "通用" role chip
                 was replaced by the permission-mode dropdown — that

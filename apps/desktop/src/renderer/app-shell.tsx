@@ -617,7 +617,7 @@ export function AppShell({
   const onboarding = useOnboardingSnapshot(initialOnboardingSnapshot);
   const [quickChatPending, setQuickChatPending] = useState(false);
   const quickChatPendingRef = useRef(false);
-  const { handleQuickChatSubmit } = createAppShellQuickChatActions({
+  const { handleQuickChatSubmit, handleExpertTeamStart } = createAppShellQuickChatActions({
     activeIdRef,
     captureComposerImportOwner,
     composerRef,
@@ -629,6 +629,16 @@ export function AppShell({
     setQuickChatPending,
     toastApi,
   });
+  // Built-in expert teams for the composer "+" menu. Loaded once — the catalog
+  // is static, so a failure just leaves the 专家团 entry hidden.
+  const [expertTeams, setExpertTeams] = useState<readonly { id: string; name: string; description?: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.maka.expertTeam.list()
+      .then((result) => { if (!cancelled) setExpertTeams(result.teams); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const onboardingState = onboarding.snapshot?.state;
   const onboardingSettled = hasSettledInitialOnboarding(onboarding.snapshot?.milestones ?? []);
   // Seed sessions from the onboarding snapshot on first load — the snapshot
@@ -1485,6 +1495,8 @@ export function AppShell({
                 onRemoveAttachment={removeAttachment}
                 onPickAttachments={pickAttachments}
                 onAttachFilePaths={attachFilePaths}
+                expertTeams={expertTeams}
+                onStartExpertTeam={handleExpertTeamStart}
                 modelLabel={
                   activeModelLabel
                   ?? newChatModelLabel
