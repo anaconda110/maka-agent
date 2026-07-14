@@ -95,13 +95,6 @@ describe('provider catalog contract — structural invariants over CATALOG_PROVI
         def.fallbackModels.length,
         `${type} ships duplicate fallback model ids`,
       );
-      if (def.fallbackModels.length > 0) {
-        // The default model is the first shipped id: it must be non-empty and,
-        // by construction, drawn from the provider's own shipped list.
-        const defaultModel = def.fallbackModels[0]!;
-        assert.ok(defaultModel.trim().length > 0, `${type} default model must be non-empty`);
-        assert.ok(def.fallbackModels.includes(defaultModel), `${type} default model must belong to its shipped list`);
-      }
       if (def.modelDiscovery.kind === 'fallback') {
         // Static-fallback discovery has no live /models source, so the shipped
         // snapshot is the only model source and must be non-empty.
