@@ -1747,7 +1747,7 @@ describe('Maka Pi TUI transcript', () => {
 
     const lines = renderMakaPiTranscript(state, meta(), 100).map(stripAnsi);
     assert.equal(lines.length, 3);
-    assert.match(lines.join('\n'), /wrote 42 bytes out\.txt/);
+    assert.match(lines.join('\n'), /Wrote 42 bytes to out\.txt/);
     assert.doesNotMatch(lines.join('\n'), /\(Ctrl\+O\)/);
   });
 

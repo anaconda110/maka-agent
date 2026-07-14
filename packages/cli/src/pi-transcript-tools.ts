@@ -141,7 +141,7 @@ function compactToolSummary(entry: MakaPiToolEntry, width: number): CompactToolS
   if (result?.kind === 'terminal') return compactTerminalSummary(result, hasLiveOutput);
   if (result?.kind === 'file_diff') return compactDiffSummary(result);
   if (result?.kind === 'file_write') {
-    return { text: `wrote ${result.bytes} bytes ${result.path}`, expandable: hasLiveOutput };
+    return { text: `Wrote ${result.bytes} bytes to ${result.path}`, expandable: hasLiveOutput };
   }
 
   if (entry.toolName === 'Grep') {
