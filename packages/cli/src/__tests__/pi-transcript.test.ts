@@ -493,7 +493,7 @@ describe('Maka Pi TUI transcript', () => {
     ] satisfies StoredMessage[]);
 
     const rendered = renderMakaPiTranscript(state, meta(), 100).map(stripAnsi).join('\n');
-    assert.match(rendered, /Tool Bash \$ npm test done 5s/);
+    assert.match(rendered, /Tool Bash \$ npm test done 5000ms/);
   });
 
   test('rebuilds automatic context compaction notes from stored session messages', () => {
@@ -1006,7 +1006,7 @@ describe('Maka Pi TUI transcript', () => {
 
     assert.equal(refreshRunningShellRunElapsed(state, 13_500), true);
     const rendered = renderMakaPiTranscript(state, meta(), 100).map(stripAnsi).join('\n');
-    assert.match(rendered, /running 12s/);
+    assert.match(rendered, /running 12500ms/);
     assert.match(rendered, /Ask Maka to stop this task/);
   });
 
@@ -1209,7 +1209,7 @@ describe('Maka Pi TUI transcript', () => {
 
     assert.equal(applied, true);
     const rendered = renderMakaPiTranscript(state, meta(), 100).map(stripAnsi).join('\n');
-    assert.match(rendered, /Tool Bash \$ build done 4s/);
+    assert.match(rendered, /Tool Bash \$ build done 4000ms/);
     assert.match(rendered, /done/);
   });
 

@@ -38,9 +38,7 @@ function toolStatusText(entry: MakaPiToolEntry): string {
         : ansi.red(entry.status);
   const duration = entry.durationMs === undefined
     ? ''
-    : entry.toolName === 'Bash' && entry.result?.kind === 'shell_run'
-      ? ansi.dim(` ${Math.floor(entry.durationMs / 1_000)}s`)
-      : ansi.dim(` ${entry.durationMs}ms`);
+    : ansi.dim(` ${entry.durationMs}ms`);
   return `${status}${duration}`;
 }
 

@@ -519,7 +519,7 @@ describe('Maka Pi TUI runner', () => {
         output: pipeOutput('done\n'),
       },
     });
-    await waitFor(() => plainTerminalOutput(terminal.screenOutput()).includes('done 4s'));
+    await waitFor(() => plainTerminalOutput(terminal.screenOutput()).includes('done 4000ms'));
 
     exitMaka(terminal);
     await run;
@@ -1835,7 +1835,7 @@ describe('Maka Pi TUI runner', () => {
     terminal.input('/session session-2');
     terminal.input('\r');
 
-    await waitFor(() => plainTerminalOutput(terminal.screenOutput()).includes('done 4s'));
+    await waitFor(() => plainTerminalOutput(terminal.screenOutput()).includes('done 4000ms'));
     assert.deepEqual(reads, ['session-2']);
 
     exitMaka(terminal);
