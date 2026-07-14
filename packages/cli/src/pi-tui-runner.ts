@@ -726,6 +726,9 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       label: session.name || session.id,
       description: `${shortSessionId(session.id)} ${session.model}`,
     }));
+    // Reserve ~25 columns for the description (short id + model) so long CJK
+    // names truncate instead of swallowing the disambiguation text.
+    const maxNameWidth = Math.max(20, terminal.columns - 25);
     showSelectPicker(
       'Resume Session (Current Folder)',
       'Current Folder',
@@ -733,7 +736,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       (item) => {
         void runControl(() => switchSession(item.value));
       },
-      { minPrimaryColumnWidth: 20, maxPrimaryColumnWidth: 120 },
+      { minPrimaryColumnWidth: 20, maxPrimaryColumnWidth: maxNameWidth },
     );
   };
 
