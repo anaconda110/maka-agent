@@ -31,6 +31,17 @@ import {
 } from './pi-transcript-format.js';
 import { renderToolBlock } from './pi-transcript-tools.js';
 
+export interface MakaPiUsageSummary {
+  /** Cumulative cost in USD across the session. */
+  costUsd: number;
+  /** Cumulative cache hit input tokens. */
+  cacheHitInput: number;
+  /** Cumulative cache miss input tokens. */
+  cacheMissInput: number;
+  /** Remaining context tokens from the latest token_usage event. */
+  contextRemaining?: number;
+}
+
 export interface MakaPiTranscriptState {
   entries: MakaPiTranscriptEntry[];
   sawTextDeltaMessageIds: Set<string>;
@@ -45,6 +56,8 @@ export interface MakaPiTranscriptState {
    */
   expandAllTools: boolean;
   expandAllThinking: boolean;
+  /** Aggregated token usage for statusline display; reset on session switch. */
+  usage: MakaPiUsageSummary;
 }
 
 export type MakaPiPendingInteraction = PermissionRequestEvent | UserQuestionRequestEvent;
@@ -93,6 +106,7 @@ export interface MakaPiTranscriptMetadata {
   thinkingLevels?: readonly ThinkingLevel[];
   sessionId?: string | null;
   busy?: boolean;
+  usage?: MakaPiUsageSummary;
 }
 
 export function createMakaPiTranscriptState(): MakaPiTranscriptState {
@@ -102,6 +116,7 @@ export function createMakaPiTranscriptState(): MakaPiTranscriptState {
     queuedInteractions: [],
     expandAllTools: false,
     expandAllThinking: false,
+    usage: { costUsd: 0, cacheHitInput: 0, cacheMissInput: 0 },
   };
 }
 
@@ -166,6 +181,7 @@ export function replaceTranscriptWithStoredMessages(
   clearPendingInteractions(state);
   state.expandAllTools = false;
   state.expandAllThinking = false;
+  state.usage = { costUsd: 0, cacheHitInput: 0, cacheMissInput: 0 };
 }
 
 /** Toggle expansion of every tool card at once; false when there is none. */
@@ -436,6 +452,10 @@ export function applyMakaSessionEventToTranscript(
       break;
 
     case 'token_usage': {
+      state.usage.costUsd += event.costUsd ?? 0;
+      state.usage.cacheHitInput += event.cacheHitInput ?? event.cacheRead ?? 0;
+      state.usage.cacheMissInput += event.cacheMissInput ?? 0;
+      state.usage.contextRemaining = event.contextRemaining;
       const notice = contextBudgetOutcomeNotice(event.contextBudget);
       if (notice) {
         state.entries.push({
@@ -884,11 +904,33 @@ function transcriptEntrySignature(
 
 export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width: number): string {
   const safeWidth = Math.max(1, width);
-  const thinking = metadata.thinkingLevel ? ansi.dim(` thinking:${metadata.thinkingLevel}`) : '';
-  return fitLine(
-    `${ansi.bold(metadata.title)} ${ansi.dim(metadata.model)} ${ansi.dim(metadata.connectionSlug)} ${ansi.dim(metadata.permissionMode)}${thinking} ${ansi.dim(metadata.cwd)}`,
-    safeWidth,
-  );
+  const sep = ansi.dim(' · ');
+  const parts: string[] = [ansi.bold(metadata.title), ansi.dim(metadata.permissionMode), ansi.dim(metadata.model)];
+  const thinking = metadata.thinkingLevel ? ansi.dim(`thinking:${metadata.thinkingLevel}`) : '';
+  if (thinking) parts.push(thinking);
+  const usage = metadata.usage;
+  if (usage) {
+    if (usage.contextRemaining !== undefined) {
+      parts.push(ansi.dim(`ctx ${formatTokenCount(usage.contextRemaining)}`));
+    }
+    if (usage.costUsd > 0) {
+      parts.push(ansi.dim(`$${usage.costUsd.toFixed(2)}`));
+    }
+    const totalCache = usage.cacheHitInput + usage.cacheMissInput;
+    if (totalCache > 0) {
+      const hitRate = Math.round((usage.cacheHitInput / totalCache) * 100);
+      parts.push(ansi.dim(`cache ${hitRate}%`));
+    }
+  }
+  parts.push(ansi.dim(metadata.connectionSlug));
+  parts.push(ansi.dim(metadata.cwd));
+  return fitLine(parts.join(sep), safeWidth);
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
 }
 
 function appendAssistantText(state: MakaPiTranscriptState, messageId: string, text: string): void {

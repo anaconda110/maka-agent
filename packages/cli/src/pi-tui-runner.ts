@@ -145,6 +145,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     thinkingLevels,
     sessionId: input.driver.getSessionId(),
     busy,
+    usage: state.usage,
   });
 
   const transcript = new MakaTranscriptComponent(state, metadata);
