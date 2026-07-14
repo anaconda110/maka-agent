@@ -914,7 +914,7 @@ export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width
       parts.push(ansi.dim(`ctx ${formatTokenCount(usage.contextRemaining)}`));
     }
     if (usage.costUsd > 0) {
-      parts.push(ansi.dim(`$${usage.costUsd.toFixed(2)}`));
+      parts.push(ansi.dim(`$${formatCost(usage.costUsd)}`));
     }
     const totalCache = usage.cacheHitInput + usage.cacheMissInput;
     if (totalCache > 0) {
@@ -931,6 +931,11 @@ function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
   return String(tokens);
+}
+
+function formatCost(costUsd: number): string {
+  if (costUsd < 0.01) return costUsd.toFixed(4);
+  return costUsd.toFixed(2);
 }
 
 function appendAssistantText(state: MakaPiTranscriptState, messageId: string, text: string): void {
