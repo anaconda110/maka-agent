@@ -92,6 +92,7 @@ export interface RunHarborCellInput {
   contextBudgetPolicy?: HarborCellContextBudgetPolicySnapshot;
   continuationPolicy?: HarborCellContinuationPolicy;
   taskToolSummaryEnabled?: boolean;
+  settleAfterMs?: number;
   now?: () => number;
   newId?: () => string;
 }
@@ -127,6 +128,7 @@ export interface RunHarborCellResult {
   output: HarborCellOutput;
   outputPath: string;
   runtimeEventsPath: string;
+  settledByDeadline: boolean;
 }
 
 export type RunHarborCellEnv = Record<string, string | undefined>;
@@ -302,6 +304,9 @@ const PI_PROVIDER_ENV_RULES = [
 ] satisfies Array<{ includes: string[]; keys?: string[]; prefixes?: string[] }>;
 
 export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarborCellResult> {
+  if (input.settleAfterMs !== undefined && (!Number.isFinite(input.settleAfterMs) || input.settleAfterMs <= 0)) {
+    throw new Error('settleAfterMs must be a finite positive number');
+  }
   if (backendNeedsIsolation(input.config.backend)) {
     validateRealBackendIsolation(input.realBackendIsolation);
     if (!input.registerBackends) {
@@ -374,6 +379,21 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
     name: `harbor-cell:${input.config.id}`,
   });
 
+  let deadlineReached = false;
+  let settlementError: unknown;
+  let settlementAttempt: Promise<void> | undefined;
+  const settlementTimer = input.settleAfterMs === undefined
+    ? undefined
+    : setTimeout(() => {
+        deadlineReached = true;
+        settlementAttempt = manager.stopSession(session.id, {
+          source: 'benchmark_deadline',
+          mode: 'after_step',
+        }).catch((error) => {
+          settlementError = error;
+        });
+      }, input.settleAfterMs);
+
   const continuationPolicy = input.continuationPolicy ?? {
     enabled: false,
     maxTurns: 1,
@@ -387,6 +407,7 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
   let attemptedTurnId: string | undefined;
   try {
     for (let turnIndex = 0; turnIndex < continuationPolicy.maxTurns; turnIndex += 1) {
+      if (deadlineReached) break;
       const turnId = newId();
       attemptedTurnId = turnId;
       invocation = undefined;
@@ -398,6 +419,7 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
       }
       if (!invocation) throw new Error('Harbor cell turn finished without a runtime invocation result');
       invocations.push(invocation);
+      if (deadlineReached) break;
       if (!isToolCallStepCap(invocation)) break;
       stepCapHits += 1;
       if (totalRuntimeSteps(invocations) >= continuationPolicy.maxTotalRuntimeSteps) break;
@@ -406,7 +428,11 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
     }
   } catch (error) {
     sendMessageError = error;
+  } finally {
+    if (settlementTimer) clearTimeout(settlementTimer);
   }
+  await settlementAttempt;
+  if (settlementError) throw settlementError;
   if (sendMessageError) {
     invocations.push(failedInvocationFromError(sendMessageError, {
       newId,
@@ -418,6 +444,11 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
     throw new Error('Harbor cell finished without a runtime invocation result');
   }
   const combinedInvocation = combineInvocations(invocations);
+  const terminalRun = deadlineReached
+    ? await agentRunStore.readRun(session.id, combinedInvocation.runId).catch(() => undefined)
+    : undefined;
+  const settledByDeadline = terminalRun?.status === 'cancelled'
+    && terminalRun.abortSource === 'benchmark.deadline';
   const continuationSummary = continuationPolicy.enabled
     ? buildContinuationSummary(continuationPolicy, invocations, stepCapHits)
     : undefined;
@@ -436,7 +467,7 @@ export async function runHarborCell(input: RunHarborCellInput): Promise<RunHarbo
   }));
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
 
-  return { invocation: combinedInvocation, output, outputPath, runtimeEventsPath };
+  return { invocation: combinedInvocation, output, outputPath, runtimeEventsPath, settledByDeadline };
 }
 
 export async function runHarborCellFromEnv(
@@ -454,6 +485,7 @@ export async function runHarborCellFromEnv(
   const economyTaskMode = economyTaskModeFromEnv(resolvedEnv.MAKA_ECONOMY_TASK_MODE);
   const taskLedgerExperimentPolicy = buildHarborCellTaskLedgerExperimentPolicy(resolvedEnv);
   const maxSteps = harborCellMaxStepsFromEnv(resolvedEnv);
+  const settleAfterMs = harborCellSoftTimeoutMsFromEnv(resolvedEnv);
   const reasoningEffort = reasoningEffortFromEnv(resolvedEnv.MAKA_REASONING_EFFORT);
   const baseConfig = {
     id: resolvedEnv.MAKA_CONFIG_ID ?? 'harbor-cell',
@@ -536,6 +568,7 @@ export async function runHarborCellFromEnv(
     ...(contextBudgetPolicy ? { contextBudgetPolicy } : {}),
     ...(continuationPolicy ? { continuationPolicy } : {}),
     ...(taskLedgerExperimentPolicy ? { taskToolSummaryEnabled: true } : {}),
+    ...(settleAfterMs !== undefined ? { settleAfterMs } : {}),
     ...(registerBackends ? { registerBackends } : {}),
     ...(backendNeedsIsolation(backend)
       ? {
@@ -582,6 +615,10 @@ export function buildHarborCellContinuationPolicy(
 
 export function harborCellMaxStepsFromEnv(env: RunHarborCellEnv = process.env): number | undefined {
   return positiveIntEnv(env.MAKA_MAX_STEPS, 'MAKA_MAX_STEPS');
+}
+
+export function harborCellSoftTimeoutMsFromEnv(env: RunHarborCellEnv = process.env): number | undefined {
+  return positiveIntEnv(env.MAKA_CELL_SOFT_TIMEOUT_MS, 'MAKA_CELL_SOFT_TIMEOUT_MS');
 }
 
 function isToolCallStepCap(invocation: InvocationResult): boolean {

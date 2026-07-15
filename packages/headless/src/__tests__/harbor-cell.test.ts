@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { BackendKind, LlmConnection, SessionEvent, SessionHeader } from '@maka/core';
-import type { BackendSendInput, PermissionDecision } from '@maka/core/backend-types';
+import type { BackendSendInput, BackendStopMode, PermissionDecision } from '@maka/core/backend-types';
 import {
   BackendRegistry,
   PermissionEngine,
@@ -121,6 +121,87 @@ const registerThrowingBackend = (registry: BackendRegistry): void => {
   registry.register('fake', (ctx) => new ThrowingBackend({ sessionId: ctx.sessionId }));
 };
 
+class DeadlineSettlingBackend implements AgentBackend {
+  readonly sessionId: string;
+  readonly stopModes: BackendStopMode[] = [];
+  private releaseStop!: () => void;
+  private readonly stopped = new Promise<void>((resolve) => {
+    this.releaseStop = resolve;
+  });
+
+  constructor(sessionId: string, readonly kind: BackendKind = 'fake') {
+    this.sessionId = sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    await this.stopped;
+    const ts = Date.now();
+    yield {
+      type: 'token_usage',
+      id: 'usage-before-deadline',
+      turnId: input.turnId,
+      ts,
+      input: 13,
+      output: 5,
+      total: 18,
+      costUsd: 0.004,
+    };
+    yield {
+      type: 'complete',
+      id: 'deadline-complete',
+      turnId: input.turnId,
+      ts: Date.now(),
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(_reason: 'user_stop' | 'redirect', mode: BackendStopMode = 'immediate'): Promise<void> {
+    this.stopModes.push(mode);
+    this.releaseStop();
+  }
+
+  async respondToPermission(_decision: PermissionDecision): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
+class TerminalClaimBeforeDeadlineBackend implements AgentBackend {
+  readonly kind = 'fake' as const;
+  readonly sessionId: string;
+  stopCalls = 0;
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    yield {
+      type: 'token_usage',
+      id: 'usage-before-normal-completion',
+      turnId: input.turnId,
+      ts: Date.now(),
+      input: 2,
+      output: 1,
+      total: 3,
+      costUsd: 0.001,
+    };
+    yield {
+      type: 'complete',
+      id: 'completed-before-deadline',
+      turnId: input.turnId,
+      ts: Date.now(),
+      stopReason: 'end_turn',
+    };
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+  }
+
+  async stop(): Promise<void> {
+    this.stopCalls += 1;
+  }
+
+  async respondToPermission(_decision: PermissionDecision): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
 class StepCapThenCompleteBackend implements AgentBackend {
   readonly kind: BackendKind = 'fake';
   readonly sessionId: string;
@@ -171,6 +252,41 @@ class StepCapThenCompleteBackend implements AgentBackend {
   async stop(): Promise<void> {}
   async respondToPermission(_decision: PermissionDecision): Promise<void> {}
   async dispose(): Promise<void> {}
+}
+
+class DeadlineStepCapBackend extends StepCapThenCompleteBackend {
+  private releaseStop!: () => void;
+  private readonly stopped = new Promise<void>((resolve) => {
+    this.releaseStop = resolve;
+  });
+
+  override async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    if (this.prompts.length > 0) {
+      yield* super.send(input);
+      return;
+    }
+    this.prompts.push(input.text);
+    this.cwds.push(this.ctx.header.cwd);
+    await this.stopped;
+    const ts = Date.now();
+    yield {
+      type: 'token_usage',
+      id: 'usage-deadline-step-cap',
+      turnId: input.turnId,
+      ts,
+      input: 10,
+      output: 1,
+      total: 11,
+      costUsd: 0.01,
+      rawFinishReason: 'tool-calls',
+      runtimeSteps: 50,
+    };
+    yield { type: 'complete', id: 'complete-deadline-step-cap', turnId: input.turnId, ts, stopReason: 'end_turn' };
+  }
+
+  override async stop(): Promise<void> {
+    this.releaseStop();
+  }
 }
 
 function registerStepCapThenCompleteBackend(seen: { backend?: StepCapThenCompleteBackend }) {
@@ -432,6 +548,87 @@ describe('runHarborCell', () => {
     });
   });
 
+  test('settles the active session before its hard deadline and writes final usage', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const deadline = { settleAfterMs: 1_000 };
+      let backend: DeadlineSettlingBackend | undefined;
+      const result = await withTimeout(runHarborCell({
+        config,
+        instruction: 'keep working until stopped',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+        ...deadline,
+        registerBackends: (registry) => {
+          registry.register('fake', (ctx) => {
+            backend = new DeadlineSettlingBackend(ctx.sessionId);
+            return backend;
+          });
+        },
+      }), 10_000, 'Harbor cell did not settle before the hard deadline');
+
+      assert.equal(result.settledByDeadline, true);
+      assert.deepEqual(backend?.stopModes, ['after_step']);
+      assert.equal(result.output.tokenSummary?.total, 18);
+      assert.deepEqual(
+        JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8')),
+        result.output,
+      );
+    });
+  });
+
+  test('does not report deadline settlement after normal completion already claimed the terminal state', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      let backend: TerminalClaimBeforeDeadlineBackend | undefined;
+      const result = await runHarborCell({
+        config,
+        instruction: 'finish before the deadline',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+        settleAfterMs: 1_000,
+        registerBackends: (registry) => {
+          registry.register('fake', (ctx) => {
+            backend = new TerminalClaimBeforeDeadlineBackend(ctx.sessionId);
+            return backend;
+          });
+        },
+      });
+
+      assert.equal(result.settledByDeadline, false);
+      assert.equal(backend?.stopCalls, 0);
+    });
+  });
+
+  test('does not start a continuation turn after the settlement deadline latches', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      let backend: DeadlineStepCapBackend | undefined;
+      const result = await withTimeout(runHarborCell({
+        config,
+        instruction: 'stop at the deadline',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+        settleAfterMs: 25,
+        continuationPolicy: {
+          enabled: true,
+          maxTurns: 2,
+          maxTotalRuntimeSteps: 100,
+          prompt: 'continue after the deadline',
+        },
+        registerBackends: (registry) => {
+          registry.register('fake', (ctx) => {
+            backend = new DeadlineStepCapBackend({ sessionId: ctx.sessionId, header: ctx.header });
+            return backend;
+          });
+        },
+      }), 5_000, 'Harbor cell did not settle its capped turn');
+
+      assert.equal(result.settledByDeadline, true);
+      assert.deepEqual(backend?.prompts, ['stop at the deadline']);
+    });
+  });
+
   test('writes execution identity before the first model call', async () => {
     await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
       let observedIdentity: unknown;
@@ -505,6 +702,27 @@ describe('runHarborCell', () => {
         JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8')),
         result.output,
       );
+    });
+  });
+
+  test('env entrypoint settles at the configured soft deadline', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const result = await withTimeout(runHarborCellFromEnv({
+        MAKA_BACKEND: 'fake',
+        MAKA_INSTRUCTION: 'keep working until stopped',
+        MAKA_MODEL: 'fake-model',
+        MAKA_WORKDIR: workspaceDir,
+        MAKA_OUTPUT_DIR: outputDir,
+        MAKA_STORAGE_ROOT: storageRoot,
+        MAKA_CELL_SOFT_TIMEOUT_MS: '1000',
+      }, {
+        registerBackends: (registry) => {
+          registry.register('fake', (ctx) => new DeadlineSettlingBackend(ctx.sessionId));
+        },
+      }), 10_000, 'Harbor env cell did not honor its soft deadline');
+
+      assert.equal(result.settledByDeadline, true);
+      assert.equal(result.output.tokenSummary?.total, 18);
     });
   });
 
@@ -1090,6 +1308,46 @@ describe('runHarborCell', () => {
       const output = JSON.parse(await readFile(join(outputDir, 'maka-cell-output.json'), 'utf8'));
       assert.equal(output.executionIdentity.pricingProfile, 'frozen-pricing-profile');
     });
+  });
+
+  test('host-side Harbor cell returns after settling at its soft deadline', async () => {
+    const { main } = await import(new URL('../../harbor/run-host-cell.mjs', import.meta.url).href) as {
+      main: (options?: { registerBackends?: (registry: BackendRegistry) => void }) => Promise<unknown>;
+    };
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const previousEnv = { ...process.env };
+      try {
+        process.env.MAKA_PROVIDER = 'openai';
+        process.env.MAKA_MODEL = 'openai/gpt-4o-mini';
+        process.env.MAKA_HOST_API_KEY = 'test-key';
+        process.env.MAKA_HARBOR_TOOL_EXECUTOR_URL = 'http://127.0.0.1:1';
+        process.env.MAKA_HARBOR_TOOL_EXECUTOR_TOKEN = 'token';
+        process.env.MAKA_INSTRUCTION = 'Keep working until stopped.';
+        process.env.MAKA_WORKDIR = workspaceDir;
+        process.env.MAKA_OUTPUT_DIR = outputDir;
+        process.env.MAKA_STORAGE_ROOT = storageRoot;
+        process.env.MAKA_CELL_SOFT_TIMEOUT_MS = '1000';
+        const result = await withTimeout(main({
+          registerBackends: (registry) => {
+            registry.register('ai-sdk', (ctx) => new DeadlineSettlingBackend(ctx.sessionId, 'ai-sdk'));
+          },
+        }), 10_000, 'host cell did not honor its soft deadline');
+
+        assert.equal(Reflect.get(result as object, 'settledByDeadline'), true);
+        const output = JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8'));
+        assert.equal(output.tokenSummary.total, 18);
+      } finally {
+        process.env = previousEnv;
+      }
+    });
+  });
+
+  test('host-side deadline settlement exits with the conventional timeout status', async () => {
+    const module = await import(new URL('../../harbor/run-host-cell.mjs', import.meta.url).href) as Record<string, unknown>;
+    const hostCellExitCode = module.hostCellExitCode as ((result: { settledByDeadline: boolean }) => number);
+
+    assert.equal(hostCellExitCode({ settledByDeadline: true }), 124);
+    assert.equal(hostCellExitCode({ settledByDeadline: false }), 0);
   });
 
   test('host-side Harbor cell config treats MAKA_ECONOMY_TASK_MODE=false as explicit disable', async () => {
@@ -3266,6 +3524,17 @@ async function withDirs<T>(
     await rm(workspaceDir, { recursive: true, force: true });
     await rm(outputDir, { recursive: true, force: true });
     await rm(storageRoot, { recursive: true, force: true });
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    })]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
