@@ -63,6 +63,7 @@ import { OpenAiCodexService } from './oauth/openai-codex-service.js';
 import { GitHubCopilotSubscriptionService } from './oauth/github-copilot-subscription-service.js';
 import { CursorSubscriptionService } from './oauth/cursor-subscription-service.js';
 import { AntigravitySubscriptionService } from './oauth/antigravity-subscription-service.js';
+import { importLegacyOAuthTokenFiles } from './oauth/shared-credential-bridge.js';
 import type { WorkspacePrivacyContext } from '@maka/core/incognito';
 import type { LlmCallRecord, PricingConfig, ToolInvocationRecord } from '@maka/core/usage-stats/types';
 import type {
@@ -366,9 +367,11 @@ function hasConnectionSecret(connection: LlmConnection): Promise<boolean> {
 }
 const cursorSubscription = new CursorSubscriptionService({
   userDataDir: app.getPath('userData'),
+  credentialStore,
 });
 const antigravitySubscription = new AntigravitySubscriptionService({
   userDataDir: app.getPath('userData'),
+  credentialStore,
 });
 
 const planReminderStore = createPlanReminderStore(workspaceRoot);
@@ -2312,6 +2315,17 @@ app.whenReady().then(async () => {
   // settled. Any state that background startup mutates is pushed to the
   // renderer via the existing `sessions:changed` / `connections:event`
   // / `settings:bots:statusChanged` channels, so the UI converges lazily.
+  // Visual-smoke fixture mode wipes and reseeds the whole workspace
+  // (`rm -rf` first). That wipe must finish BEFORE the window opens and
+  // before background startup touches the workspace: createWindow reads
+  // the settings store, and a concurrent wipe lands inside the store's
+  // read-or-create write (mkdir → tmp → rename), rejecting createWindow
+  // so the window never appears. Fixture runs trade first-paint latency
+  // for determinism by definition; production launches skip this await.
+  if (visualSmokeFixture) {
+    console.log(`[visual-smoke] scenario=${visualSmokeFixture.scenario} workspace=${workspaceRoot}`);
+    await seedVisualSmokeFixture({ workspaceRoot, fixture: visualSmokeFixture, credentialStore });
+  }
   const backgroundStartup = runBackgroundStartup();
   await mainWindowController.createWindow();
   // Keep the process alive until background work settles so schedulers
@@ -2340,10 +2354,32 @@ async function runBackgroundStartup(): Promise<void> {
   } catch (error) {
     console.error('[credentials] migration off safeStorage failed; legacy file left intact:', error);
   }
-  if (visualSmokeFixture) {
-    console.log(`[visual-smoke] scenario=${visualSmokeFixture.scenario} workspace=${workspaceRoot}`);
-    await seedVisualSmokeFixture({ workspaceRoot, fixture: visualSmokeFixture, credentialStore });
-  } else {
+  // One-shot import of pre-#1125 safeStorage-encrypted OAuth token
+  // files into the shared CredentialStore, which is the only token
+  // authority from here on. Best-effort like the migration above:
+  // files that cannot be decrypted are left intact for a later start.
+  try {
+    const userDataDir = app.getPath('userData');
+    const reports = await importLegacyOAuthTokenFiles({
+      credentialStore,
+      decryptor: safeStorage,
+      files: [
+        { slug: 'claude-subscription', filePath: join(userDataDir, '.claude_subscription_token') },
+        { slug: 'codex-subscription', filePath: join(userDataDir, '.codex_subscription_token') },
+        { slug: 'cursor-subscription', filePath: join(userDataDir, '.cursor_subscription_token') },
+        { slug: 'antigravity-subscription', filePath: join(userDataDir, '.antigravity_subscription_token') },
+      ],
+    });
+    for (const report of reports) {
+      const log = report.outcome === 'failed' ? console.error : console.log;
+      log(`[credentials] legacy OAuth token file for ${report.slug}: ${report.outcome}`, report.error ?? '');
+    }
+  } catch (error) {
+    console.error('[credentials] legacy OAuth token import failed; files left intact:', error);
+  }
+  // Visual-smoke seeding happens synchronously in `whenReady` before the
+  // window opens (see there for why); only the real bootstrap runs here.
+  if (!visualSmokeFixture) {
     await ensureBootstrapConnection();
   }
   const settings = await settingsStore.get();
