@@ -126,7 +126,7 @@ export const MAKA_CATALOG_TOOLS: readonly CatalogToolDef[] = Object.freeze(
     { name: 'maka_computer' },
     // rive surface
     { name: 'RiveWorkflow' },
-    // agent surface (id matches AGENT_TOOL_GROUP_ID / buildSubagentToolGroup)
+    // agent surface (id matches AGENT_TOOL_GROUP_ID)
     { name: 'agent_spawn' },
     { name: 'agent_swarm' },
     { name: 'agent_list' },
@@ -135,12 +135,21 @@ export const MAKA_CATALOG_TOOLS: readonly CatalogToolDef[] = Object.freeze(
 );
 
 /**
- * Jointly governed deferred packs. Id `agent` matches the existing
- * ToolAvailability group (`buildSubagentToolGroup`), not a separate "subagent" id.
+ * Jointly governed deferred packs. Id `agent` matches the runtime
+ * ToolAvailability group id (AGENT_TOOL_GROUP_ID), not a separate "subagent" id.
  * Each surface gets its own hosts object so affinity cannot cross-contaminate.
  */
 export const MAKA_CATALOG_SURFACES: readonly CatalogSurfaceDef[] = Object.freeze(
   [
+    {
+      id: 'rive',
+      label: 'Rive',
+      description:
+        'Durable multi-agent Rive workflows: validate/import/run/status, scheduler, retries.',
+      economy: 'deferred' as const,
+      toolNames: ['RiveWorkflow'],
+      hosts: desktopOnlyHosts(),
+    },
     {
       id: 'office',
       label: 'Office',
@@ -170,15 +179,6 @@ export const MAKA_CATALOG_SURFACES: readonly CatalogSurfaceDef[] = Object.freeze
       description: 'Observe and operate an explicitly approved local application.',
       economy: 'deferred' as const,
       toolNames: ['maka_computer'],
-      hosts: desktopOnlyHosts(),
-    },
-    {
-      id: 'rive',
-      label: 'Rive',
-      description:
-        'Durable multi-agent Rive workflows: validate/import/run/status, scheduler, retries.',
-      economy: 'deferred' as const,
-      toolNames: ['RiveWorkflow'],
       hosts: desktopOnlyHosts(),
     },
     {

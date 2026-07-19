@@ -455,7 +455,6 @@ export {
   buildParentAgentTools,
   buildSubagentProjectionTools,
   buildSubagentSpawnTool,
-  buildSubagentToolGroup,
 } from './subagent-tools.js';
 export {
   BUILTIN_EXPERT_TEAMS,
@@ -1060,6 +1059,7 @@ export type {
 
 // tool-catalog-derive.ts — HostCapabilities + deferred groups from catalog ∩ binding (#1099).
 export {
+  assertProductBindingCatalogClean,
   buildDeferredToolGroupsFromCatalog,
   buildHostCapabilitiesFromBinding,
 } from './tool-catalog-derive.js';
@@ -1198,6 +1198,7 @@ export {
   buildSkillsPromptFragment,
   loadSkillInstructions,
   buildSkillAgentTool,
+  SKILL_TOOL_NAME,
   gateSkillsByHostCapabilities,
   parseSkillFrontMatter,
   validateSkillMetadata,
