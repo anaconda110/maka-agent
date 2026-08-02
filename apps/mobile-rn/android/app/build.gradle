@@ -1,0 +1,130 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+def projectRoot = rootProject.projectDir
+def appRoot = project(":app").projectDir
+def reactNativeRoot = file("${appRoot}/../../node_modules/react-native")
+
+react {
+    /* The root of the React Native project (where package.json lives). */
+    root = file("${appRoot}/..")
+    /* Path to the JS bundle entry file relative to the React root. */
+    entryFile = "index.js"
+    /* Enable Hermes JS engine. */
+    hermesEnabled = true
+    /* Enable new architecture (Fabric + TurboModules). */
+    newArchEnabled = false
+    /* Codegen specs (used when new architecture is enabled). */
+    codegenSrcPackages = []
+}
+
+/**
+ * Signing configurations.
+ *
+ * - debug: uses the standard Android debug keystore shipped with the SDK
+ *   so that local development does not require a manual keystore.
+ * - release: reads a keystore from gradle.properties / environment so
+ *   production releases can be signed. The placeholder values below are
+ *   intentionally invalid; CI must supply real values via
+ *   `MAKA_ANDROID_*` properties before producing a release APK/AAB.
+ */
+android {
+    namespace "com.maka.mobile"
+
+    compileSdkVersion rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId "ai.maka.mobile"
+        minSdkVersion rootProject.ext.minSdkVersion        // 24
+        targetSdkVersion rootProject.ext.targetSdkVersion  // 34
+        versionCode 1
+        versionName "0.1.0"
+        // Reduce APK size by excluding unused ABIs when set via property.
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+        }
+    }
+
+    signingConfigs {
+        debug {
+            // The default debug keystore (~/.android/debug.keystore) is auto-applied.
+            storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+        release {
+            // Placeholder: real values must be supplied via gradle.properties
+            // or CI environment (MAKA_ANDROID_STORE_FILE / _STORE_PASSWORD /
+            // _KEY_ALIAS / _KEY_PASSWORD). Until then, release builds will
+            // fall back to the debug key (NOT for production).
+            if (project.hasProperty("MAKA_ANDROID_STORE_FILE")) {
+                storeFile file(project.getProperty("MAKA_ANDROID_STORE_FILE"))
+                storePassword project.getProperty("MAKA_ANDROID_STORE_PASSWORD")
+                keyAlias project.getProperty("MAKA_ANDROID_KEY_ALIAS")
+                keyPassword project.getProperty("MAKA_ANDROID_KEY_PASSWORD")
+            } else {
+                // Fall back to debug key for local release builds (placeholder).
+                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+            minifyEnabled false
+            shrinkResources false
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            // Drop debuggable flag for production builds.
+            debuggable false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    packagingOptions {
+        // Exclude duplicate META-INF files that ship with some RN deps.
+        exclude "META-INF/DEPENDENCIES"
+        exclude "META-INF/LICENSE"
+        exclude "META-INF/LICENSE.txt"
+        exclude "META-INF/license.txt"
+        exclude "META-INF/NOTICE"
+        exclude "META-INF/NOTICE.txt"
+        exclude "META-INF/notice.txt"
+        exclude "META-INF/ASL2.0"
+    }
+}
+
+dependencies {
+    // React Native core. The version is resolved by the React Native Gradle plugin.
+    implementation "com.facebook.react:react-native:+"
+    // Hermes (matches hermesEnabled flag; auto-enabled by the React plugin when enabled).
+    if (rootProject.ext.has("hermesEnabled") ? rootProject.ext.get("hermesEnabled") : true) {
+        implementation("com.facebook.react:hermes-engine:+") {
+            exclude group: "com.facebook.react", module: "react-native"
+        }
+    }
+}
+
+// Apply the React Native community CLI native modules autolinking.
+apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle")
+applyNativeModulesAppBuildGradle(project)
