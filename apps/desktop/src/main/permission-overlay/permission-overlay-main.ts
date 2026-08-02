@@ -67,6 +67,27 @@ export interface PermissionOverlayMainDeps {
 export function createPermissionOverlayMain(
   deps: PermissionOverlayMainDeps,
 ): PermissionOverlayController {
+  // The drag-to-grant card is a macOS TCC affordance: it hands the .app
+  // bundle to System Settings via `webContents.startDrag`, which is an
+  // NSPasteboard write no other platform's privacy UI reads. Windows has
+  // no equivalent gesture (Privacy panes do not accept dropped EXEs), so
+  // the whole overlay is unsupported on win32. Return a stub controller
+  // whose `start` always resolves to `unsupported_platform` without
+  // touching Electron — this also keeps the renderer-facing entry point
+  // registered (boot.ts wires it unconditionally) but the renderer should
+  // hide the button via the capability snapshot, which already reports
+  // accessibility / screen_recording as `unsupported` on win32.
+  if (process.platform === 'win32') {
+    return {
+      async start() {
+        return { ok: false, reason: 'unsupported_platform' };
+      },
+      dismiss() {},
+      isOpen() { return false; },
+      activePermission() { return null; },
+    };
+  }
+
   let locale: UiLocale = 'en';
   let iconDataUrl: string | null = null;
   const electron = requireElectron('electron') as Electron;
