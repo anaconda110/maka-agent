@@ -174,7 +174,7 @@ import { openDesktopExecutionStoreWiring } from './execution-store-wiring.js';
 // the redirected path.
 if (process.platform === 'win32' && process.env.MAKA_WINDOWS_KEEP_ROAMING !== '1') {
   try {
-    const localAppData = app.getPath('localAppData');
+    const localAppData = process.env.LOCALAPPDATA;
     if (localAppData) {
       app.setPath('userData', join(localAppData, app.getName()));
     }
