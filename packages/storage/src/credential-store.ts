@@ -409,12 +409,7 @@ async function chmodStrict(path: string, mode: number): Promise<void> {
  */
 function tightenWindowsAcl(targetPath: string): Promise<void> {
   const user = resolveWindowsUser();
-  const args = [
-    targetPath,
-    '/inheritance:r',
-    '/grant:r',
-    `${user}:(OI)(CI)F`,
-  ];
+  const args = [targetPath, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`];
   return new Promise((resolve) => {
     execFile('icacls', args, { windowsHide: true }, () => resolve());
   });
