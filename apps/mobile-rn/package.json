@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@maka/core": "0.1.0",
+    "@maka/runtime-host": "0.1.0",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-navigation/bottom-tabs": "^7.18.14",
     "@react-navigation/native": "^7.3.14",
