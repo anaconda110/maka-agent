@@ -13,9 +13,15 @@
 //
 // Call `resolveShellEnv()` once, early in main.ts, before any stores, tools,
 // or child processes are created.
+//
+// On Windows the same problem applies differently: GUI launches inherit
+// the system PATH but frequently miss the user PATH that lives in
+// `HKCU\Environment` (entries added by installers like Scoop, Python, node
+// version managers, etc.). We resolve it by launching PowerShell with the
+// user's profile, capturing the resolved `$env:Path`, and applying that.
 
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { basename } from 'node:path';
 
@@ -41,8 +47,23 @@ const ELECTRON_PROBE_ENV = {
  * continues with whatever environment Electron was given.
  */
 export async function resolveShellEnv(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> {
-  if (process.platform === 'win32') return;
   if (process.env.MAKA_SKIP_SHELL_ENV === '1') return;
+  if (process.platform === 'win32') {
+    if (process.env.TERM || process.env.COLORTERM) return;
+    try {
+      const resolved = await captureWindowsPath(timeoutMs);
+      if (resolved && resolved.length > 0) {
+        process.env.PATH = resolved;
+        const entries = resolved.split(';').filter((entry) => entry.length > 0).length;
+        console.log(`[shell-env] resolved Windows PATH (${entries} entries)`);
+      }
+    } catch (err) {
+      console.warn(
+        `[shell-env] failed to resolve Windows PATH: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return;
+  }
   if (process.env.TERM || process.env.COLORTERM) return;
 
   try {
@@ -258,4 +279,160 @@ async function captureLoginShellPath(timeoutMs: number): Promise<string> {
       fail(new Error(`timed out after ${timeoutMs}ms spawning ${shell}`));
     }, timeoutMs);
   });
+}
+
+/**
+ * Select the PowerShell executable to launch on Windows. PowerShell Core
+ * (`pwsh.exe`) is preferred when present because its startup is faster and it
+ * sources the user profile consistently; the built-in Windows PowerShell
+ * (`powershell.exe`) is the always-available fallback. Returned as a bare
+ * name rather than an absolute path so the OS PATH lookup resolves the real
+ * location (PowerShell is on every Windows user's PATH).
+ */
+export function selectWindowsShell(inheritedComSpec?: string): string {
+  if (inheritedComSpec && /pwsh\.exe$/i.test(inheritedComSpec)) return inheritedComSpec;
+  if (inheritedComSpec && /powershell\.exe$/i.test(inheritedComSpec)) return inheritedComSpec;
+  // pwsh is the modern cross-platform build; powershell.exe ships with Windows.
+  return 'powershell.exe';
+}
+
+/**
+ * Resolve the user's Windows PATH.
+ *
+ * GUI launches on Windows inherit the system PATH but usually miss the
+ * per-user PATH that lives under `HKCU\Environment` (entries written by
+ * Scoop, Python, node version managers, MSYS2, etc.). Rather than parsing
+ * the registry and re-implementing `%VAR%` expansion, we spawn a login
+ * PowerShell — which sources the user profile and resolves both system and
+ * user PATH into `$env:Path` — and capture only that one value with the
+ * same UUID-marker technique the POSIX path uses.
+ *
+ * The registry path (`HKCU\Environment` + `HKLM\...\Session Manager\Environment`)
+ * would avoid spawning a process but requires re-implementing `REG_EXPAND_SZ`
+ * expansion (e.g. `%USERPROFILE%\bin`); the PowerShell capture handles that
+ * for free and also picks up profile-level additions (a common pattern for
+ * developers who append to `$env:Path` in their profile).
+ *
+ * On any failure the function throws and `resolveShellEnv` keeps the
+ * inherited PATH, so the app still boots — it just may miss user PATH.
+ */
+async function captureWindowsPath(timeoutMs: number): Promise<string> {
+  const shell = selectWindowsShell(process.env.MAKA_WINDOWS_SHELL);
+  const shellName = basename(shell);
+  // buildCaptureCommand already knows how to quote PowerShell single-quoted
+  // payloads and emit a marker-wrapped JSON of `{ PATH: process.env.PATH }`.
+  const mark = randomUUID().replace(/-/g, '').slice(0, 12);
+  const markerRegex = buildMarkerRegex(mark);
+  const { command, shellArgs } = buildCaptureCommand(shellName, process.execPath, mark);
+
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    ...ELECTRON_PROBE_ENV,
+  };
+
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(shell, [...shellArgs, command], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      windowsHide: true,
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    let capturedBytes = 0;
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      child.stdout.removeAllListeners();
+      child.stderr.removeAllListeners();
+      child.removeAllListeners();
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      cleanup();
+      reject(error);
+    };
+
+    const succeed = (path: string) => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      cleanup();
+      resolve(path);
+    };
+
+    const capture = (chunk: Buffer, keep: boolean) => {
+      capturedBytes += chunk.length;
+      if (capturedBytes > MAX_CAPTURE_BYTES) {
+        fail(new Error(`shell output exceeded ${MAX_CAPTURE_BYTES} bytes`));
+        return;
+      }
+      if (keep) stdoutChunks.push(chunk);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => capture(chunk, true));
+    // Count stderr toward the bound but never retain it: profiles may print
+    // secrets during startup.
+    child.stderr.on('data', (chunk: Buffer) => capture(chunk, false));
+
+    child.on('error', (err) => {
+      fail(new Error(`failed to spawn ${shell}: ${err.message}`));
+    });
+
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      if (code !== 0 && code !== null) {
+        fail(new Error(`${shell} exited with code ${code}${signal ? ` (signal ${signal})` : ''}`));
+        return;
+      }
+
+      const raw = Buffer.concat(stdoutChunks).toString('utf8');
+      const match = markerRegex.exec(raw);
+      if (!match) {
+        fail(new Error(`could not find PATH markers in ${shell} output`));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(match[1]) as Record<string, string>;
+        if (typeof parsed.PATH !== 'string' || parsed.PATH.length === 0) {
+          throw new Error('captured Windows shell did not provide PATH');
+        }
+        succeed(parsed.PATH);
+      } catch {
+        fail(new Error('failed to parse Windows PATH JSON'));
+      }
+    });
+
+    timer = setTimeout(() => {
+      fail(new Error(`timed out after ${timeoutMs}ms spawning ${shell}`));
+    }, timeoutMs);
+  });
+}
+
+/**
+ * Read-only registry fallback for environments where spawning PowerShell is
+ * not desirable. Exported for tests; the production path goes through the
+ * PowerShell capture above because it resolves `%VAR%` expansions and
+ * profile-level PATH additions that the registry does not surface on its
+ * own.
+ */
+export function readWindowsRegistryPath(): string | null {
+  try {
+    const user = execFileSync(
+      'reg',
+      ['query', 'HKCU\\Environment', '/v', 'Path'],
+      { windowsHide: true, encoding: 'utf8' },
+    );
+    const match = user.match(/Path\s+REG(?:_EXPAND_)?SZ\s+(.+)/i);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
 }
