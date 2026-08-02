@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /**
@@ -341,8 +343,10 @@ class FileCredentialStore implements CredentialStore {
  * re-chmod a pre-existing looser dir so neither the secret nor the lock can sit
  * world-readable. mkdir's mode only applies on creation, so the chmod is what
  * fixes an existing dir. On POSIX a chmod failure fails closed (we must not
- * write plaintext credentials into a dir we couldn't lock down); no-op on
- * Windows. Shared by the writer and the lock so their dir hardening can't drift.
+ * write plaintext credentials into a dir we couldn't lock down); on Windows the
+ * chmod is a no-op and `chmodStrict` instead tightens the NTFS ACL via
+ * `icacls` (best-effort). Shared by the writer and the lock so their dir
+ * hardening can't drift.
  */
 async function ensureSecretDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -373,15 +377,53 @@ async function writeSecretFileAtomic(path: string, contents: string): Promise<vo
  * chmod that fails loud on POSIX and is best-effort on Windows. A secret file
  * or its directory left looser than intended breaks the 0600/0700 boundary, so
  * on POSIX we surface the failure rather than write plaintext into it; Windows
- * has no POSIX mode, so a failure there is a no-op. One policy for both the
- * secret file (0600) and its directory (0700) so they can't drift apart.
+ * has no POSIX mode, so chmod is a no-op there. On Windows we additionally
+ * tighten the ACL via `icacls` (best-effort): strip inherited ACEs and grant
+ * only the current user full control. That mirrors the 0600/0700 intent (owner
+ * only) as closely as a per-user ACL can on NTFS, where file modes do not
+ * exist. The `icacls` failure is swallowed — a missing `icacls` (e.g. a
+ * stripped Windows SKU) must not block credential writes, but it leaves the
+ * file under whatever inherited ACL the parent dir granted. One policy for
+ * both the secret file (0600) and its directory (0700) so they can't drift
+ * apart.
  */
 async function chmodStrict(path: string, mode: number): Promise<void> {
   if (process.platform === 'win32') {
     await chmod(path, mode).catch(() => {});
+    await tightenWindowsAcl(path).catch(() => {});
     return;
   }
   await chmod(path, mode);
+}
+
+/**
+ * Best-effort Windows ACL tightening via `icacls`: remove inherited ACEs and
+ * grant the current user full control, so neither the secret file nor its
+ * lock dir sits readable by other accounts on the box. `(OI)(CI)` lets the
+ * grant propagate into a directory's children, which is what the 0700 lock
+ * dir needs; on a file it is harmlessly ignored. The owner is resolved via
+ * `USERDOMAIN\USERNAME` when a domain is present (the same shape `whoami`
+ * returns), falling back to the bare `USERNAME`. `icacls` is a system utility
+ * on every supported Windows release, but a failure here is never fatal —
+ * callers that need a hard guarantee must run on POSIX.
+ */
+function tightenWindowsAcl(targetPath: string): Promise<void> {
+  const user = resolveWindowsUser();
+  const args = [
+    targetPath,
+    '/inheritance:r',
+    '/grant:r',
+    `${user}:(OI)(CI)F`,
+  ];
+  return new Promise((resolve) => {
+    execFile('icacls', args, { windowsHide: true }, () => resolve());
+  });
+}
+
+function resolveWindowsUser(): string {
+  const username = process.env.USERNAME ?? userInfo().username;
+  const domain = process.env.USERDOMAIN;
+  return domain ? `${domain}\\${username}` : username;
 }
 
 // A contended acquire polls this often, then fails loud after the timeout.
