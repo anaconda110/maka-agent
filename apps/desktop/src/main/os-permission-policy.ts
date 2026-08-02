@@ -61,7 +61,11 @@ export function planPermissionRequest(input: {
     // Windows has no equivalent of `askForMediaAccess`; the first media
     // request triggers a Chromium consent dialog. We can only deep-link to
     // the Privacy pane for the permissions Windows exposes there.
-    if (input.id === 'microphone' || input.id === 'notifications') return 'open_settings';
+    if (input.id === 'microphone') {
+      if (input.microphoneStatus === 'granted') return 'already_granted';
+      return 'open_settings';
+    }
+    if (input.id === 'notifications') return 'open_settings';
     return 'unsupported_platform';
   }
   return 'unsupported_platform';
