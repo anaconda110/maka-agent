@@ -330,9 +330,15 @@ function notificationSnapshot(now: number, platform: NodeJS.Platform): OsPermiss
     reason: supported
       ? platform === 'darwin'
         ? 'Electron 无法可靠读取 macOS 通知授权状态，请在系统设置中确认'
-        : 'Electron 无法可靠读取当前系统的通知授权状态'
+        : platform === 'win32'
+          ? 'Electron 无法可靠读取 Windows 通知授权状态，请在系统设置中确认'
+          : 'Electron 无法可靠读取当前系统的通知授权状态'
       : 'Electron 通知能力不可用',
-    canOpenSettings: platform === 'darwin',
+    // macOS exposes an x-apple.systempreferences deep link and Windows exposes
+    // an `ms-settings:notifications` URI; both let us deep-link the user to the
+    // right pane. Other platforms (Linux) have no equivalent, so they stay
+    // closed there.
+    canOpenSettings: platform === 'darwin' || platform === 'win32',
     // Showing a Notification is not an authorization API and does not report
     // whether macOS delivered or suppressed it. Never present that probe as a
     // successful permission request.
