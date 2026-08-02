@@ -8,13 +8,32 @@ export interface SessionMeta {
   createdAt: number;
 }
 
+export interface MessageMeta {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  createdAt: number;
+}
+
+export interface LlmConnectionConfig {
+  apiBaseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 export interface AppState {
   sessions: SessionMeta[];
-  activeSessionId: string | null;
+  currentSessionId: string | null;
+  messages: MessageMeta[];
+  llmConnection: LlmConnectionConfig;
   runtimeConnected: boolean;
   endpoint: string;
   createSession: (title: string) => string;
-  setActiveSession: (id: string | null) => void;
+  deleteSession: (id: string) => void;
+  setCurrentSession: (id: string | null) => void;
+  appendMessage: (input: { sessionId: string; role: MessageMeta['role']; text: string }) => void;
+  setLlmConnection: (input: Partial<LlmConnectionConfig>) => void;
   setRuntimeConnected: (connected: boolean) => void;
   setEndpoint: (endpoint: string) => void;
 }
@@ -22,26 +41,61 @@ export interface AppState {
 const newId = () =>
   `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+const newMessageId = () =>
+  `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const DEFAULT_LLM_CONNECTION: LlmConnectionConfig = {
+  apiBaseUrl: '',
+  apiKey: '',
+  model: '',
+};
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       sessions: [],
-      activeSessionId: null,
+      currentSessionId: null,
+      messages: [],
+      llmConnection: { ...DEFAULT_LLM_CONNECTION },
       runtimeConnected: false,
       endpoint: 'cloud',
       createSession: (title) => {
         const session: SessionMeta = {
           id: newId(),
-          title,
+          title: title.length > 0 ? title : '新会话',
           createdAt: Date.now(),
         };
         set((state) => ({
           sessions: [...state.sessions, session],
-          activeSessionId: session.id,
+          currentSessionId: session.id,
         }));
         return session.id;
       },
-      setActiveSession: (id) => set({ activeSessionId: id }),
+      deleteSession: (id) =>
+        set((state) => ({
+          sessions: state.sessions.filter((session) => session.id !== id),
+          messages: state.messages.filter((message) => message.sessionId !== id),
+          currentSessionId:
+            state.currentSessionId === id ? null : state.currentSessionId,
+        })),
+      setCurrentSession: (id) => set({ currentSessionId: id }),
+      appendMessage: ({ sessionId, role, text }) =>
+        set((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              id: newMessageId(),
+              sessionId,
+              role,
+              text,
+              createdAt: Date.now(),
+            },
+          ],
+        })),
+      setLlmConnection: (input) =>
+        set((state) => ({
+          llmConnection: { ...state.llmConnection, ...input },
+        })),
       setRuntimeConnected: (connected) => set({ runtimeConnected: connected }),
       setEndpoint: (endpoint) => set({ endpoint }),
     }),
@@ -50,6 +104,9 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         sessions: state.sessions,
+        currentSessionId: state.currentSessionId,
+        messages: state.messages,
+        llmConnection: state.llmConnection,
         endpoint: state.endpoint,
       }),
     },
