@@ -17,6 +17,7 @@ import {
   buildMarkerRegex,
   resolveShellEnv,
   selectLoginShell,
+  selectWindowsShell,
 } from '../shell-env.js';
 
 const MARK = '0123456789ab';
@@ -288,6 +289,20 @@ describe('selectLoginShell', () => {
   it('uses platform-appropriate defaults only when neither source has a shell', () => {
     assert.equal(selectLoginShell(undefined, undefined, 'darwin'), '/bin/zsh');
     assert.equal(selectLoginShell(undefined, undefined, 'linux'), '/bin/sh');
+  });
+});
+
+describe('selectWindowsShell', () => {
+  it('prefers pwsh.exe when the env explicitly points at it', () => {
+    assert.equal(selectWindowsShell('C:\\Program Files\\PowerShell\\7\\pwsh.exe'), 'C:\\Program Files\\PowerShell\\7\\pwsh.exe');
+  });
+
+  it('keeps an inherited powershell.exe', () => {
+    assert.equal(selectWindowsShell('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  });
+
+  it('falls back to the always-available powershell.exe when nothing is inherited', () => {
+    assert.equal(selectWindowsShell(undefined), 'powershell.exe');
   });
 });
 

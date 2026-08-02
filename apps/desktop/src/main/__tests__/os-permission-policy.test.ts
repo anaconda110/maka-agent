@@ -34,7 +34,7 @@ describe('OS permission platform policy', () => {
       id: 'microphone',
       platform: 'win32',
       status: 'not_determined',
-    }), { canOpenSettings: false, canRequest: false });
+    }), { canOpenSettings: true, canRequest: false });
     assert.deepEqual(mediaPermissionActions({
       id: 'microphone',
       platform: 'linux',
@@ -75,6 +75,38 @@ describe('OS permission platform policy', () => {
     assert.equal(planPermissionRequest({
       id: 'microphone',
       platform: 'linux',
+    }), 'unsupported_platform');
+  });
+
+  it('routes Windows permissions to the only consent surfaces Windows exposes', () => {
+    // Windows has no `askForMediaAccess`; granted microphone resolves to
+    // already_granted, anything else deep-links to System Settings.
+    assert.equal(planPermissionRequest({
+      id: 'microphone',
+      platform: 'win32',
+      microphoneStatus: 'granted',
+    }), 'already_granted');
+    assert.equal(planPermissionRequest({
+      id: 'microphone',
+      platform: 'win32',
+      microphoneStatus: 'denied',
+    }), 'open_settings');
+    assert.equal(planPermissionRequest({
+      id: 'notifications',
+      platform: 'win32',
+    }), 'open_settings');
+    // No system-level screen capture / accessibility / automation consent UI.
+    assert.equal(planPermissionRequest({
+      id: 'screen_recording',
+      platform: 'win32',
+    }), 'unsupported_platform');
+    assert.equal(planPermissionRequest({
+      id: 'accessibility',
+      platform: 'win32',
+    }), 'unsupported_platform');
+    assert.equal(planPermissionRequest({
+      id: 'automation',
+      platform: 'win32',
     }), 'unsupported_platform');
   });
 });
