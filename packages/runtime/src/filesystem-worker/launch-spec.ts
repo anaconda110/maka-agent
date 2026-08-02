@@ -184,15 +184,31 @@ async function resolveReadableRoot(candidate: string): Promise<string | undefine
 }
 
 function defaultRipgrepCandidates(env: NodeJS.ProcessEnv): readonly string[] {
-  return [
-    ...(env.PATH ?? '')
-      .split(delimiter)
-      .filter(Boolean)
-      .map((directory) => join(directory, 'rg')),
-    '/opt/homebrew/bin/rg',
-    '/usr/local/bin/rg',
-    '/usr/bin/rg',
-  ];
+  const isWindows = process.platform === 'win32';
+  const executableName = isWindows ? 'rg.exe' : 'rg';
+  const pathCandidates = (env.PATH ?? '')
+    .split(delimiter)
+    .filter(Boolean)
+    .map((directory) => join(directory, executableName));
+  if (isWindows) {
+    // Windows has no canonical ripgrep install location; cover the common
+    // package managers so the filesystem worker can still grep without
+    // relying on the user's PATH (a GUI-launched Electron often inherits a
+    // minimal PATH on Windows). chocolatey, Git for Windows, and Scoop cover
+    // the three most common install routes; winget installs into per-user
+    // PATH which the PATH scan above already covers.
+    return [
+      ...pathCandidates,
+      'C:\\ProgramData\\chocolatey\\bin\\rg.exe',
+      'C:\\Program Files\\Git\\cmd\\rg.exe',
+      'C:\\Program Files\\Git\\usr\\bin\\rg.exe',
+      'C:\\Program Files (x86)\\Git\\cmd\\rg.exe',
+      'C:\\Program Files (x86)\\Git\\usr\\bin\\rg.exe',
+      `${env.USERPROFILE ?? ''}\\scoop\\shims\\rg.exe`,
+      `${env.USERPROFILE ?? ''}\\scoop\\apps\\ripgrep\\current\\rg.exe`,
+    ];
+  }
+  return [...pathCandidates, '/opt/homebrew/bin/rg', '/usr/local/bin/rg', '/usr/bin/rg'];
 }
 
 async function resolveRuntimeDependencyRoots(program: string): Promise<readonly string[]> {
