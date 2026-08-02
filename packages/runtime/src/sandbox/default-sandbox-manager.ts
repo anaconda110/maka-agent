@@ -22,6 +22,12 @@ export function isBuiltinFilesystemWorkerSandboxAvailable(
   arch: NodeJS.Architecture = process.arch,
 ): boolean {
   if (platform === 'darwin') return true;
+  // Windows has no built-in Maka sandbox backend (no seatbelt/bwrap
+  // equivalent); AppContainer / Windows Sandbox are a future addition. Until
+  // then the filesystem worker runs unsandboxed on win32 and the caller must
+  // rely on the OS user account boundary, so the built-in sandbox is reported
+  // unavailable here.
+  if (platform === 'win32') return false;
   return (
     platform === 'linux' &&
     linuxCapability !== undefined &&

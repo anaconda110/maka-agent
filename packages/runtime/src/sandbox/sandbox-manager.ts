@@ -92,6 +92,22 @@ export class SandboxManager {
       };
     }
 
+    if (platform === 'win32') {
+      // Windows has no built-in Maka sandbox backend. Restricted profiles
+      // fail closed with `unsupported_platform` (callers must either relax the
+      // profile or accept an unsandboxed run under the OS user boundary). If
+      // the profile did not require a sandbox we already returned `none`
+      // above, so this path only fires when enforcement is required.
+      return {
+        ok: false,
+        reason: 'unsupported_platform',
+        requiresSandbox: true,
+        platform,
+        preference,
+        message: 'Sandbox enforcement is not available on Windows.',
+      };
+    }
+
     return {
       ok: false,
       reason: 'unsupported_platform',

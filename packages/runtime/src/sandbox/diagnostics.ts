@@ -257,7 +257,13 @@ async function probeFilesystemCapability(
   const passive = passiveCapability(input.profile);
   if (passive) return passive;
   if (!input.sandboxManager) {
-    return unavailable(expectedSandboxType(input.platform), 'selection', 'backend_not_available');
+    return unavailable(
+      expectedSandboxType(input.platform),
+      'selection',
+      input.platform === 'darwin' || input.platform === 'linux'
+        ? 'backend_not_available'
+        : 'unsupported_platform',
+    );
   }
 
   const selection = input.sandboxManager.selectInitial({
