@@ -1,0 +1,19 @@
+# Android / Gradle
+.gradle/
+build/
+*.iml
+local.properties
+
+# Metro
+.metro-cache/
+
+# Node
+node_modules/
+
+# iOS
+ios/Pods/
+ios/build/
+
+# Misc
+.DS_Store
+*.log

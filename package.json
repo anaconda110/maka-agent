@@ -18,7 +18,8 @@
     "packages/headless",
     "packages/cli",
     "packages/ui",
-    "apps/desktop"
+    "apps/desktop",
+    "apps/mobile-rn"
   ],
   "scripts": {
     "postinstall": "install-electron",

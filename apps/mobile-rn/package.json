@@ -1,0 +1,26 @@
+{
+  "name": "@maka/mobile-rn",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Maka Android / React Native client — cloud-first model connection and runtime-host adapter.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@maka/core": "0.1.0",
+    "@react-native-async-storage/async-storage": "^2.1.0",
+    "react-native-keychain": "^9.2.0",
+    "react-native-sqlite-storage": "^6.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-native": "^0.78.0"
+  }
+}
