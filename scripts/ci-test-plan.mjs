@@ -64,6 +64,9 @@ const EXTENDED_SCRIPT_FILES = new Set([
   'scripts/package-macos-arm64.mjs',
   'scripts/prepare-cua-driver.mjs',
   'scripts/verify-macos-arm64-dmg.mjs',
+  'scripts/package-windows-x64.mjs',
+  'scripts/verify-windows-x64.mjs',
+  'scripts/windows-x64-release.test.mjs',
 ]);
 
 function normalizePath(path) {
