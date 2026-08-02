@@ -53,6 +53,22 @@ const MACOS_DEEP_LINKS: Record<OsPermissionId, string | null> = {
   notifications: 'x-apple.systempreferences:com.apple.preference.notifications',
 };
 
+/**
+ * Windows 10/11 `ms-settings:` deep-link targets. Only the permissions
+ * Windows actually exposes in Privacy & Security are listed; the others
+ * resolve to `unsupported_platform` via `planPermissionRequest` and never
+ * reach `openSystemPermissionPane`. Windows has no system-level screen
+ * capture or automation consent UI, so those IDs are intentionally
+ * absent and fall through to the generic fallback.
+ */
+const WINDOWS_DEEP_LINKS: Record<OsPermissionId, string | null> = {
+  accessibility: null,
+  screen_recording: null,
+  microphone: 'ms-settings:privacy-microphone',
+  automation: null,
+  notifications: 'ms-settings:notifications',
+};
+
 function normalizePermissionId(input: unknown): OsPermissionId | null {
   if (typeof input !== 'string') return null;
   return (OS_PERMISSION_IDS as readonly string[]).includes(input)
@@ -63,17 +79,33 @@ function normalizePermissionId(input: unknown): OsPermissionId | null {
 export async function openSystemPermissionPane(input: unknown): Promise<PermissionActionResult> {
   const id = normalizePermissionId(input);
   if (!id) return { ok: false, reason: 'invalid_id' };
-  if (process.platform !== 'darwin') {
-    return { ok: false, reason: 'unsupported_platform' };
+  // macOS exposes x-apple.systempreferences deep links for every TCC pane;
+  // Windows only exposes `ms-settings:` URIs for microphone and notifications.
+  // Every other Windows permission (accessibility / screen_recording /
+  // automation) has no system consent UI at all and is routed to
+  // `unsupported_platform` by `planPermissionRequest` before it gets here, so
+  // this branch only handles the two Windows actually supports.
+  if (process.platform === 'darwin') {
+    const url = MACOS_DEEP_LINKS[id];
+    if (!url) return { ok: false, reason: 'unsupported_permission' };
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: 'open_settings_failed', message: errorMessage(err) };
+    }
   }
-  const url = MACOS_DEEP_LINKS[id];
-  if (!url) return { ok: false, reason: 'unsupported_permission' };
-  try {
-    await shell.openExternal(url);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, reason: 'open_settings_failed', message: errorMessage(err) };
+  if (process.platform === 'win32') {
+    const url = WINDOWS_DEEP_LINKS[id];
+    if (!url) return { ok: false, reason: 'unsupported_permission' };
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: 'open_settings_failed', message: errorMessage(err) };
+    }
   }
+  return { ok: false, reason: 'unsupported_platform' };
 }
 
 export async function requestPermissionAccess(input: unknown): Promise<PermissionActionResult> {
@@ -84,7 +116,7 @@ export async function requestPermissionAccess(input: unknown): Promise<Permissio
       id,
       platform: process.platform,
       microphoneStatus:
-        id === 'microphone' && process.platform === 'darwin'
+        id === 'microphone' && (process.platform === 'darwin' || process.platform === 'win32')
           ? systemPreferences.getMediaAccessStatus('microphone')
           : undefined,
     });
@@ -96,6 +128,9 @@ export async function requestPermissionAccess(input: unknown): Promise<Permissio
       case 'open_settings':
         return openSystemPermissionPane(id);
       case 'request_microphone': {
+        // `askForMediaAccess` is documented macOS-only; on Windows the
+        // first media request triggers a Chromium consent dialog and the
+        // plan never routes here, so the call is effectively macOS-only.
         const granted = await systemPreferences.askForMediaAccess('microphone');
         return granted
           ? { ok: true }

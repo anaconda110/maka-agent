@@ -28,7 +28,9 @@ export function mediaPermissionActions(input: {
   status: OsPermissionState;
 }): { canOpenSettings: boolean; canRequest: boolean } {
   return {
-    canOpenSettings: input.platform === 'darwin',
+    canOpenSettings:
+      input.platform === 'darwin'
+        || (input.platform === 'win32' && input.id === 'microphone'),
     canRequest:
       input.platform === 'darwin'
       && input.id === 'microphone'
@@ -47,9 +49,20 @@ export function planPermissionRequest(input: {
   platform: NodeJS.Platform;
   microphoneStatus?: string;
 }): PermissionRequestPlan {
-  if (input.platform !== 'darwin') return 'unsupported_platform';
-  if (input.id !== 'microphone') return 'open_settings';
-  if (input.microphoneStatus === 'granted') return 'already_granted';
-  if (input.microphoneStatus === 'not-determined') return 'request_microphone';
-  return 'open_settings';
+  // Permissions with no system-level consent UI on the platform never make it
+  // past the gate; see `phase-a-analysis.md` §1.2 for the Windows matrix.
+  if (input.platform === 'darwin') {
+    if (input.id !== 'microphone') return 'open_settings';
+    if (input.microphoneStatus === 'granted') return 'already_granted';
+    if (input.microphoneStatus === 'not-determined') return 'request_microphone';
+    return 'open_settings';
+  }
+  if (input.platform === 'win32') {
+    // Windows has no equivalent of `askForMediaAccess`; the first media
+    // request triggers a Chromium consent dialog. We can only deep-link to
+    // the Privacy pane for the permissions Windows exposes there.
+    if (input.id === 'microphone' || input.id === 'notifications') return 'open_settings';
+    return 'unsupported_platform';
+  }
+  return 'unsupported_platform';
 }
