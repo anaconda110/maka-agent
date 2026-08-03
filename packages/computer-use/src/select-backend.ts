@@ -69,6 +69,19 @@ export function selectComputerUseBackend(deps?: {
   overlay?: CuOverlayHook;
   createBackend?: (options: CuaDriverBackendOptions) => DisposableBackend;
 }): SelectedComputerUseBackend {
+  // Windows (win32) + Linux: the cua-driver binary is a macOS-only native
+  // helper (signing/notarization + Accessibility/Screen Recording API), so
+  // there is no Windows backend to wire. Returning NONE here makes the
+  // Computer Use capability surface as `not_available` end-to-end:
+  // `createComputerUseHost` falls through to `selectComputerUseBackend()`
+  // (no args) on every error/missing-artifact path, and
+  // `capability-snapshot.ts` maps `backendId === 'none'` to
+  // `feature.state = 'not_available'`, which the permission-center UI
+  // renders as an explicit "Unavailable" row — no separate UI entry to
+  // hide. This is the intended graceful degradation on Windows; do not
+  // remove the `process.platform !== 'darwin'` guard without first
+  // landing a Windows-native cua-driver backend and an `os-permission`
+  // branch for accessibility/screen capture on win32.
   if (process.platform !== 'darwin') return NONE;
   if (!deps?.binaryPath || !deps.expectedBinarySha256) return NONE;
   try {
