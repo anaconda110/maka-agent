@@ -123,6 +123,10 @@ dependencies {
             exclude group: "com.facebook.react", module: "react-native"
         }
     }
+    // AppCompat — required by res/values/styles.xml which uses
+    // Theme.AppCompat.DayNight.NoActionBar. Without this dependency aapt2 fails
+    // with 'resource style/Theme.AppCompat.DayNight.NoActionBar not found'.
+    implementation "androidx.appcompat:appcompat:1.7.0"
 }
 
 // Apply the React Native community CLI native modules autolinking.
