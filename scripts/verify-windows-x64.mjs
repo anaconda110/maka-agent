@@ -324,12 +324,20 @@ export async function smokePackagedRenderer(executable, { workingDirectory }) {
   }
 }
 
+// Escape a path for safe embedding inside a PowerShell single-quoted string.
+// PowerShell single-quote escaping: replace every ' with ''. Defensively guards
+// against exePath containing quotes/special chars even though the path is built
+// from trusted inputs (mkdtemp / NSIS /D=) in this script's context. W-6.
+function psQuotePath(value) {
+  return String(value).replace(/'/g, "''");
+}
+
 async function readFileVersion(run, exePath) {
   const { stdout } = await run('powershell.exe', [
     '-NoProfile',
     '-NoLogo',
     '-Command',
-    `(Get-Item -LiteralPath '${exePath}').VersionInfo.ProductVersion`,
+    `(Get-Item -LiteralPath '${psQuotePath(exePath)}').VersionInfo.ProductVersion`,
   ]);
   return stdout.trim();
 }
@@ -343,7 +351,7 @@ async function assertExecutableArchitecture(run, exePath) {
     '-NoLogo',
     '-Command',
     String.raw`
-$bytes = [System.IO.File]::ReadAllBytes('${exePath}'.Replace('\','/'));
+$bytes = [System.IO.File]::ReadAllBytes('${psQuotePath(exePath)}'.Replace('\','/'));
 $peOffset = [BitConverter]::ToInt32($bytes, 0x3C);
 $machine  = [BitConverter]::ToUInt16($bytes, $peOffset + 4);
 if ($machine -ne 0x8664) { Write-Output ('arch=' + $machine.ToString('X4')) } else { Write-Output 'arch=x64' }
@@ -360,7 +368,7 @@ async function verifyAuthenticodeSignature(run, exePath) {
     '-NoProfile',
     '-NoLogo',
     '-Command',
-    `(Get-AuthenticodeSignature -LiteralPath '${exePath}').Status`,
+    `(Get-AuthenticodeSignature -LiteralPath '${psQuotePath(exePath)}').Status`,
   ]);
   const status = stdout.trim();
   // `Valid` requires the signing certificate to chain to a trusted root on the
