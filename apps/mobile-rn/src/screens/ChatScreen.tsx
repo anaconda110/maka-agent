@@ -3,7 +3,6 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import type { MainTabParamList } from '../navigation/types';
 import { useAppStore } from '../store/appStore';
 import { MessageBubble } from '../components/MessageBubble';
 import { SessionListItem } from '../components/SessionListItem';
+import { newSessionTitle } from '../utils/session';
 
 type ChatScreenProps = BottomTabScreenProps<MainTabParamList, 'Chat'>;
 
@@ -44,34 +44,42 @@ export function ChatScreen(_props: ChatScreenProps) {
   };
 
   const handleNewSession = () => {
-    createSession(`会话 ${sessions.length + 1}`);
+    createSession(newSessionTitle());
   };
+
+  const renderSessionItem = ({ item }: { item: (typeof sessions)[number] }) => (
+    <SessionListItem
+      session={item}
+      active={item.id === currentSessionId}
+      onSelect={setCurrentSession}
+    />
+  );
+
+  const sessionListHeader = (
+    <View style={styles.sessionHeader}>
+      <Text style={styles.sessionHeaderTitle}>会话</Text>
+      <TouchableOpacity onPress={handleNewSession} style={styles.newButton}>
+        <Text style={styles.newButtonText}>+ 新建</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
-      <ScrollView style={styles.sessionList} contentContainerStyle={styles.sessionListContent}>
-        <View style={styles.sessionHeader}>
-          <Text style={styles.sessionHeaderTitle}>会话</Text>
-          <TouchableOpacity onPress={handleNewSession} style={styles.newButton}>
-            <Text style={styles.newButtonText}>+ 新建</Text>
-          </TouchableOpacity>
-        </View>
-        {sessions.length === 0 ? (
+      <FlatList
+        style={styles.sessionList}
+        contentContainerStyle={styles.sessionListContent}
+        data={sessions}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={sessionListHeader}
+        ListEmptyComponent={
           <Text style={styles.emptyHint}>暂无会话，点击右上角新建</Text>
-        ) : (
-          sessions.map((session) => (
-            <SessionListItem
-              key={session.id}
-              session={session}
-              active={session.id === currentSessionId}
-              onSelect={setCurrentSession}
-            />
-          ))
-        )}
-      </ScrollView>
+        }
+        renderItem={renderSessionItem}
+      />
       <View style={styles.streamWrap}>
         <FlatList
           data={currentMessages}

@@ -3,6 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAppStore } from '../store/appStore';
 import { SessionListItem } from '../components/SessionListItem';
+import { newSessionTitle } from '../utils/session';
 
 type HomeScreenProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -17,7 +18,7 @@ export function HomeScreen({ navigation }: HomeScreenProps) {
   };
 
   const handleNewSession = () => {
-    createSession(`会话 ${sessions.length + 1}`);
+    createSession(newSessionTitle());
     openChat();
   };
 
