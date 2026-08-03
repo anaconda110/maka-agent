@@ -1,0 +1,37 @@
+name: Android CI
+
+on:
+  push:
+    branches: [feature/android-rn]
+  pull_request:
+    branches: [feature/android-rn]
+
+concurrency:
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - run: npm ci --ignore-scripts
+      - name: Install mobile-rn deps
+        working-directory: apps/mobile-rn
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        working-directory: apps/mobile-rn
+        run: npx tsc --noEmit
+      - name: Lint
+        working-directory: apps/mobile-rn
+        run: npx biome lint .
