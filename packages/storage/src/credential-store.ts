@@ -397,6 +397,19 @@ async function chmodStrict(path: string, mode: number): Promise<void> {
 }
 
 /**
+ * The `execFile` shape `tightenWindowsAcl` calls. Exported as a type so the
+ * icacls args-construction test can inject a recorder without reaching into
+ * `node:child_process`. Production code passes the real `execFile`; the
+ * test passes a mock that captures the args and resolves.
+ */
+export type WindowsAclExecFile = (
+  file: string,
+  args: string[],
+  options: { windowsHide: boolean },
+  callback: (error: unknown) => void,
+) => void;
+
+/**
  * Best-effort Windows ACL tightening via `icacls`: remove inherited ACEs and
  * grant the current user full control, so neither the secret file nor its
  * lock dir sits readable by other accounts on the box. `(OI)(CI)` lets the
@@ -406,16 +419,41 @@ async function chmodStrict(path: string, mode: number): Promise<void> {
  * returns), falling back to the bare `USERNAME`. `icacls` is a system utility
  * on every supported Windows release, but a failure here is never fatal —
  * callers that need a hard guarantee must run on POSIX.
+ *
+ * Exported with an injectable `execFile` so a cross-platform test can verify
+ * the icacls argv construction (path first, `/inheritance:r`,
+ * `/grant:r <user>:(OI)(CI)F`, `windowsHide: true`) and the
+ * `USERDOMAIN\USERNAME` owner resolution without a real Windows box. The
+ * production call site (`chmodStrict`) uses the default real `execFile`.
  */
-function tightenWindowsAcl(targetPath: string): Promise<void> {
+export function tightenWindowsAcl(
+  targetPath: string,
+  exec: WindowsAclExecFile = defaultWindowsAclExecFile,
+): Promise<void> {
   const user = resolveWindowsUser();
   const args = [targetPath, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`];
   return new Promise((resolve) => {
-    execFile('icacls', args, { windowsHide: true }, () => resolve());
+    exec('icacls', args, { windowsHide: true }, () => resolve());
   });
 }
 
-function resolveWindowsUser(): string {
+function defaultWindowsAclExecFile(
+  file: string,
+  args: string[],
+  options: { windowsHide: boolean },
+  callback: (error: unknown) => void,
+): void {
+  execFile(file, args, options, callback as Parameters<typeof execFile>[3]);
+}
+
+/**
+ * Resolve the Windows owner for `icacls /grant:r`. Prefers `USERNAME` and
+ * prefixes `USERDOMAIN\` when a domain is present (the shape `whoami`
+ * returns), falling back to `userInfo().username`. Exported for the
+ * icacls args-construction test so it can assert the owner string without
+ * spawning a process.
+ */
+export function resolveWindowsUser(): string {
   const username = process.env.USERNAME ?? userInfo().username;
   const domain = process.env.USERDOMAIN;
   return domain ? `${domain}\\${username}` : username;

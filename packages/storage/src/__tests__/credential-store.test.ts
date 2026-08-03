@@ -6,10 +6,13 @@ import { describe, test } from 'node:test';
 import {
   CREDENTIAL_SCHEMA_VERSION,
   createFileCredentialStore,
+  resolveWindowsUser,
+  tightenWindowsAcl,
   withCredentialFileLock,
   type CredentialCasResult,
   type CredentialKind,
   type CredentialStore,
+  type WindowsAclExecFile,
 } from '../credential-store.js';
 
 const isPosix = process.platform !== 'win32';
@@ -367,5 +370,112 @@ describe('FileCredentialStore secret-kind + slug contract', () => {
         );
       }
     });
+  });
+});
+
+describe('tightenWindowsAcl icacls argv construction', () => {
+  // W-3: the win32 icacls call has no Windows-platform unit test of its own.
+  // Drive it cross-platform by injecting a recorder `execFile` that captures
+  // the argv and options without spawning a process, so the args
+  // construction (path first, `/inheritance:r`, `/grant:r <user>:(OI)(CI)F`,
+  // `windowsHide: true`) and the `USERDOMAIN\USERNAME` owner resolution are
+  // locked down. The real `execFile` is never called here.
+
+  function snapshotEnv(): () => void {
+    const before = new Map<string, string | undefined>();
+    for (const [key, value] of Object.entries(process.env)) {
+      before.set(key, value as string | undefined);
+    }
+    return () => {
+      for (const [key, value] of before) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    };
+  }
+
+  function recorder(): {
+    exec: WindowsAclExecFile;
+    calls: Array<{ file: string; args: string[]; options: { windowsHide: boolean } }>;
+  } {
+    const calls: Array<{ file: string; args: string[]; options: { windowsHide: boolean } }> = [];
+    const exec: WindowsAclExecFile = (file, args, options, callback) => {
+      calls.push({ file, args, options });
+      // Mimic the real best-effort path: resolve regardless of error so the
+      // production promise settles (callers `.catch(() => {})` on top, but
+      // tightenWindowsAcl itself always resolves).
+      callback(null);
+    };
+    return { exec, calls };
+  }
+
+  test('invokes icacls with the target path first, inheritance removed, and the current user granted full control with (OI)(CI) propagation', async () => {
+    const restoreEnv = snapshotEnv();
+    try {
+      process.env.USERNAME = 'alice';
+      delete process.env.USERDOMAIN;
+      const { exec, calls } = recorder();
+      await tightenWindowsAcl('C:\\Users\\alice\\.maka\\credentials.json', exec);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].file, 'icacls');
+      assert.deepEqual(calls[0].args, [
+        'C:\\Users\\alice\\.maka\\credentials.json',
+        '/inheritance:r',
+        '/grant:r',
+        'alice:(OI)(CI)F',
+      ]);
+      assert.deepEqual(calls[0].options, { windowsHide: true });
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test('resolves the owner as USERDOMAIN\\USERNAME when a domain is present (the shape whoami returns)', async () => {
+    const restoreEnv = snapshotEnv();
+    try {
+      process.env.USERNAME = 'bob';
+      process.env.USERDOMAIN = 'CORP';
+      const { exec, calls } = recorder();
+      await tightenWindowsAcl('C:\\secrets\\dir.lock', exec);
+      assert.deepEqual(calls[0].args, [
+        'C:\\secrets\\dir.lock',
+        '/inheritance:r',
+        '/grant:r',
+        'CORP\\bob:(OI)(CI)F',
+      ]);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test('always resolves even when the injected execFile reports an error (best-effort: icacls failure must not block credential writes)', async () => {
+    const restoreEnv = snapshotEnv();
+    try {
+      process.env.USERNAME = 'carol';
+      delete process.env.USERDOMAIN;
+      const failingExec: WindowsAclExecFile = (_file, _args, _options, callback) => {
+        callback(new Error('icacls not found on this stripped Windows SKU') as NodeJS.ErrnoException);
+      };
+      // Must not reject — the production chmodStrict relies on this so a
+      // missing icacls never blocks a credential write.
+      await tightenWindowsAcl('C:\\secrets\\credentials.json', failingExec);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test('resolveWindowsUser falls back to userInfo().username when USERNAME is unset', () => {
+    const restoreEnv = snapshotEnv();
+    try {
+      delete process.env.USERNAME;
+      delete process.env.USERDOMAIN;
+      // We don't assert the exact value (it's the host's login), only that
+      // it is a non-empty string and the bare-username shape (no backslash).
+      const user = resolveWindowsUser();
+      assert.ok(typeof user === 'string' && user.length > 0);
+      assert.ok(!user.includes('\\'), 'no domain prefix when USERDOMAIN is absent');
+    } finally {
+      restoreEnv();
+    }
   });
 });
