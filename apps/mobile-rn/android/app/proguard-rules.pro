@@ -4,9 +4,11 @@
 # `react-native/proguard-rules.pro` for RN internals; the rules below extend
 # those defaults for Maka-specific and third-party dependencies.
 
-# --- Keep the React Native entry points and bridge ---
--keep class com.facebook.react.** { *; }
--keep class com.facebook.hermes.** { *; }
+# --- Keep the app entry points ---
+# The React Native Gradle plugin injects `react-native/proguard-rules.pro`,
+# which already keeps the RN bridge, TurboModules, Hermes internals, and
+# annotated modules. Avoid a blanket `-keep class com.facebook.react.**` so
+# R8 can prune dead RN internals; only keep app-specific classes here.
 -keep class com.maka.mobile.** { *; }
 -keep class com.maka.mobile.MainApplication { *; }
 -keep class com.maka.mobile.MainActivity { *; }
@@ -49,6 +51,3 @@
 -assumenosideeffects class android.util.Log {
     public *;
 }
-
-# --- Native libraries ---
--keep class com.facebook.react.common.build.** { *; }
