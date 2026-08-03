@@ -43,6 +43,7 @@
 @import "./styles/interaction-prompts.css" layer(components);
 @import "./styles/daily-review.css" layer(components);
 @import "./styles/theme-glass.css" layer(components);
+@import "./styles/windows-glass.css" layer(components);
 @import "./styles/prompt-rail.css" layer(components);
 @import "./styles/quote-chip.css" layer(components);
 @import "./styles/quote-side-panel.css" layer(components);

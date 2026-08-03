@@ -179,7 +179,6 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     const isDark =
       themePref === 'dark' ||
       (themePref === 'auto' && nativeTheme.shouldUseDarkColors);
-    const initialBg = isDark ? '#1c1d21' : '#ffffff';
     // Astro-Han review (#493): sync nativeTheme here too, not only via the
     // renderer's later setThemeSource() IPC call -- otherwise the vibrancy
     // material behind the sidebar can still flash the *system* theme's tint
@@ -260,7 +259,6 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       // with sanitizeBounds so the resize floor and the restore floor can't
       // drift apart (locked by app-region-hygiene-contract.test.ts).
       minHeight: SAFE_MIN_HEIGHT,
-      backgroundColor: initialBg,
       // PR-SHOW-AFTER-FIRST-COMMIT: create hidden on every run so the OS never
       // flashes the index.html `.maka-preload` skeleton before React paints.
       // The renderer signals `window:notifyRendererReady` after its first
@@ -278,6 +276,22 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       // environments can't paint native window material reliably.
       ...(process.platform === 'darwin' && !process.env.MAKA_E2E_FIXTURE
         ? { vibrancy: 'sidebar' as const }
+        : {}),
+      // Windows acrylic: Electron exposes the Win10+ acrylic material via
+      // `backgroundMaterial` (introduced in Electron 30). It paints a system
+      // composited blur of whatever is behind the window, so the renderer can
+      // make the sidebar + chrome translucent and let the acrylic show through
+      // — mirroring the darwin vibrancy pattern. `backgroundMaterial` composes
+      // ON TOP of `backgroundColor`, so an opaque initialBg would mask it; use
+      // a transparent initial bg on Windows so the acrylic is actually visible
+      // (the first frame shows the acrylic itself, not a flash — acceptable
+      // and consistent with how macOS vibrancy shows through immediately).
+      // Skipped under MAKA_E2E_FIXTURE for the same reason as darwin vibrancy.
+      ...(process.platform === 'win32' && !process.env.MAKA_E2E_FIXTURE
+        ? {
+            backgroundColor: '#00000000',
+            backgroundMaterial: 'acrylic' as const,
+          }
         : {}),
       webPreferences: {
         preload: join(import.meta.dirname, '..', 'preload', 'preload.cjs'),

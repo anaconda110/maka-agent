@@ -1,0 +1,70 @@
+/* =============================================================================
+   Glass material on Windows (acrylic).
+
+   Mirrors the macOS vibrancy pattern in theme-glass.css but for the Win10+
+   acrylic material. The pipeline is:
+   - Main process sets BrowserWindow({ backgroundMaterial: 'acrylic',
+     backgroundColor: '#00000000' }) on win32 (see main-window.ts). The
+     transparent bg is required: `backgroundMaterial` composes ON TOP of
+     `backgroundColor`, so an opaque bg would mask the acrylic.
+   - Renderer tags <html> with `data-os="win32"` via window.maka.app.info()
+     (same code path that sets data-os="darwin" — app-shell-effects.ts).
+   - The CSS below makes the window background + sidebar surface
+     translucent so the native acrylic (a system-composited blur of whatever
+     is behind the window) shows through, then applies a subtle tint so the
+     sidebar remains readable against arbitrary desktop wallpaper.
+
+   Gating: every rule is scoped to `html[data-os="win32"]`, so macOS / Linux
+   keep their existing opaque / darwin-vibrancy chrome. The tint values are
+   derived from the same neutral-glass tokens maka-tokens.css exposes for
+   darwin, tuned for the cooler / flatter acrylic substrate (Windows acrylic
+   is a flat tinted blur, not the warm layered material macOS sidebar
+   vibrancy produces, so the overlay needs a touch more opacity to keep
+   text contrast).
+
+   Disabled under MAKA_E2E_FIXTURE because the main process skips
+   backgroundMaterial there, and a transparent bg with no material behind
+   it would render a see-through window against the test harness.
+============================================================================= */
+
+html[data-os="win32"],
+  html[data-os="win32"] body {
+    background: transparent;
+  }
+
+/* Force the appFrame transparent on win32 so the acrylic substrate shows
+   through the sidebar, mirroring the darwin rule in theme-glass.css. The
+   session panel sits on a translucent tint (not fully transparent) so list
+   rows + footer stay legible over busy wallpaper. */
+
+html[data-os="win32"] .maka-session-panel {
+    background: rgba(255, 255, 255, 0.55);
+  }
+
+html[data-os="win32"].dark .maka-session-panel {
+    background: rgba(28, 29, 33, 0.6);
+  }
+
+/* The session list inherits the panel surface; keep text the standard
+   foreground so contrast holds against the tint. Mirrors the darwin rule. */
+
+html[data-os="win32"] .maka-session-list {
+    color: var(--foreground);
+  }
+
+/* Footer stays transparent so it reads as part of the sidebar surface,
+   not a stacked bar. Same contract as the darwin rule. */
+
+html[data-os="win32"] .maka-session-panel-footer {
+    border-top: 0;
+    background: transparent;
+  }
+
+/* Titlebar overlay: the OS-drawn min/max/close strip sits on the acrylic,
+   so no extra background is needed on the renderer side. The overlay color
+   is seeded by setTitleBarOverlayTheme at runtime; this rule only ensures
+   the renderer's top strip doesn't paint an opaque band over the acrylic. */
+
+html[data-os="win32"] .maka-titlebar-action {
+    background: transparent;
+  }
