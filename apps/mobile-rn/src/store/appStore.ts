@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadApiKey, saveApiKey } from '../services/keychainStorage';
 
 export interface SessionMeta {
   id: string;
@@ -34,6 +35,7 @@ export interface AppState {
   setCurrentSession: (id: string | null) => void;
   appendMessage: (input: { sessionId: string; role: MessageMeta['role']; text: string }) => void;
   setLlmConnection: (input: Partial<LlmConnectionConfig>) => void;
+  loadApiKeyFromKeychain: () => Promise<void>;
   setRuntimeConnected: (connected: boolean) => void;
   setEndpoint: (endpoint: string) => void;
 }
@@ -93,9 +95,19 @@ export const useAppStore = create<AppState>()(
           ],
         })),
       setLlmConnection: (input) =>
+        set((state) => {
+          const next = { ...state.llmConnection, ...input };
+          if (input.apiKey !== undefined) {
+            void saveApiKey(input.apiKey);
+          }
+          return { llmConnection: next };
+        }),
+      loadApiKeyFromKeychain: async () => {
+        const apiKey = await loadApiKey();
         set((state) => ({
-          llmConnection: { ...state.llmConnection, ...input },
-        })),
+          llmConnection: { ...state.llmConnection, apiKey },
+        }));
+      },
       setRuntimeConnected: (connected) => set({ runtimeConnected: connected }),
       setEndpoint: (endpoint) => set({ endpoint }),
     }),
@@ -106,7 +118,11 @@ export const useAppStore = create<AppState>()(
         sessions: state.sessions,
         currentSessionId: state.currentSessionId,
         messages: state.messages,
-        llmConnection: state.llmConnection,
+        llmConnection: {
+          apiBaseUrl: state.llmConnection.apiBaseUrl,
+          apiKey: '',
+          model: state.llmConnection.model,
+        },
         endpoint: state.endpoint,
       }),
     },
