@@ -32,7 +32,14 @@ class MainApplication : Application() {
     companion object {
         init {
             // Enable the New Architecture (Fabric/TurboModules) at runtime.
-            DefaultNewArchitectureEntryPoint.load()
+            // Only load when the new architecture was enabled at build time —
+            // calling DefaultNewArchitectureEntryPoint.load() with
+            // newArchEnabled=false raises "Unable to load script. Make sure
+            // you're running Metro" or crashes because no native codegen code
+            // was compiled. Mirrors the RN 0.79 official template gate.
+            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+                DefaultNewArchitectureEntryPoint.load()
+            }
         }
     }
 }
