@@ -42,6 +42,7 @@ import { runProjectStartupMigration } from './project-startup-migration.js';
 import { createAppQuitCoordinator } from './app-quit-coordinator.js';
 import { resolveDockPresentation } from './dock-presentation.js';
 import { resumeSafeBoundaryContinuationsOnStartup } from './startup-safe-boundary-resume.js';
+import { createWindowsTray, type WindowsTrayController } from './tray.js';
 
 type AssembledTools = ReturnType<typeof assembleDesktopTools>;
 export interface AppLifecycleDeps {
@@ -148,6 +149,10 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
 
   let backgroundStartup: Promise<void> | undefined;
   let configWatcher: ConfigFileWatcher | undefined;
+  // Windows notification-area tray, built after the first window opens and
+  // destroyed during `runBeforeQuitCleanup` so a click cannot dispatch into a
+  // freed Tray. Null on non-win32 / fixture / icon-load-failure (see tray.ts).
+  let windowsTray: WindowsTrayController | null = null;
   const quitCoordinator = createAppQuitCoordinator({
     cleanup: runBeforeQuitCleanup,
     focusOrCreateWindow: focusOrCreateMainWindow,
@@ -249,6 +254,14 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     app.on('activate', quitCoordinator.focusOrCreateWindow);
     backgroundStartup = runBackgroundStartup();
     await mainWindowController.createWindow(initialWindowSignal);
+    // Install the Windows notification-area tray after the first window is
+    // up so a left-click has a window to focus and the create-or-focus path
+    // (which mirrors second-instance/activate) runs against a ready app.
+    // createWindowsTray returns null on non-win32 / fixture environments, so
+    // this is a no-op everywhere except a real Windows desktop run.
+    windowsTray = createWindowsTray({
+      focusOrCreateWindow: focusOrCreateMainWindow,
+    });
     // Keep the process alive until background work settles so schedulers
     // / bridges aren't torn down mid-start by a fast window-all-closed.
     await backgroundStartup;
@@ -378,6 +391,11 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     } catch (error) {
       console.error('[shutdown] background startup failed:', error);
     }
+    // Tear the tray down first: its click handler can call
+    // `focusOrCreateWindow`, which must not race the window / view disposal
+    // below. `destroy()` is a no-op when the tray was never created.
+    windowsTray?.destroy();
+    windowsTray = null;
     automationWiring.scheduler.dispose();
     goalWiring.coordinator.dispose();
     goalWiring.manager.dispose();
