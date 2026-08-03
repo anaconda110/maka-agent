@@ -79,3 +79,182 @@ npm test                                       # jest
 - M3: ConnectionsScreen + SettingsScreen persistence.
 
 See `.hive/android-rn-architecture.md` for the full plan.
+
+## 故障排查
+
+### 1. gradle-wrapper.jar 缺失
+
+构建时若报 `gradle-wrapper.jar not found` 或 `Could not find or load main class org.gradle.wrapper.GradleWrapperMain`，说明 `android/gradle/wrapper/gradle-wrapper.jar` 缺失或损坏。
+
+```bash
+# 方式一：从 Gradle 官方重新生成（推荐）
+cd apps/mobile-rn/android
+gradle wrapper --gradle-version 8.13
+
+# 方式二：手动下载对应版本 jar 放入 android/gradle/wrapper/
+# 下载地址参考：https://services.gradle.org/distributions/
+# 校验 gradle-wrapper.properties 中的 distributionUrl 与下载的版本一致
+
+# 方式三：如果其他工作副本有该 jar，可直接复制
+cp <other-worktree>/apps/mobile-rn/android/gradle/wrapper/gradle-wrapper.jar \
+   android/gradle/wrapper/
+```
+
+确认 `android/gradle/wrapper/gradle-wrapper.properties` 中 `distributionUrl` 指向的版本与 `gradle-wrapper.jar` 匹配，避免运行时 NoSuchMethodError。
+
+### 2. Android SDK 未安装
+
+报错 `SDK location not found` 或 `Failed to find target with hash string 'android-XX'`。
+
+- 安装 Android Studio 或仅安装 command-line tools：
+  - 官方指南：https://developer.android.com/studio#command-line-tools-only
+- 配置 `ANDROID_HOME`（或 `ANDROID_SDK_ROOT`）环境变量：
+  ```bash
+  export ANDROID_HOME=$HOME/Android/Sdk          # Linux/macOS
+  # Windows (PowerShell): $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+  export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin
+  ```
+- 通过 `sdkmanager` 安装缺失的平台与 build-tools：
+  ```bash
+  sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+  ```
+- RN 0.79 默认 `compileSdk=34`，请确保 `platforms;android-34` 已安装；如 `local.properties` 存在，确认 `sdk.dir` 路径正确，不要把该文件提交进仓库。
+
+### 3. JDK 版本不匹配
+
+常见报错：`Unsupported class file major version`、`Could not determine java version`、`java.lang.NoSuchMethodError`。
+
+- RN 0.79 + Gradle 8.x 要求 **JDK 17**（部分 AGP 版本兼容 JDK 21，但以 17 为稳定基准）。
+- 检查当前版本：
+  ```bash
+  java -version
+  ./gradlew --version        # 查看 Gradle 使用的 JVM
+  ```
+- 多版本共存时用 `org.gradle.java.home` 指定：
+  ```bash
+  # android/gradle.properties
+  org.gradle.java.home=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
+  ```
+- macOS 可用 `jenv` / `jabba`，Windows 可用 `SDKMAN!`（WSL）或直接调整 `JAVA_HOME`。
+
+## 开发调试技巧
+
+### React Native Debugger
+
+推荐使用独立桌面端 [React Native Debugger](https://github.com/jhen0409/react-native-debugger)（内置 Redux DevTools + React DevTools）。
+
+```bash
+# macOS
+brew install --cask react-native-debugger
+# Windows / Linux
+# 从 release 页面下载对应安装包：https://github.com/jhen0409/react-native-debugger/releases
+
+# 启动 Metro 时开启调试会话
+npm start
+# 摇晃设备或 adb shell input keyevent 82 -> "Debug" -> 自动连接 Debugger
+```
+
+- 启用元素检查：Debugger 菜单 -> `Toggle Inspector`。
+- 性能分析：`React Profiler` 标签页录制交互。
+- 若使用 Zustand，可在 `appStore.ts` 中通过 `devtools` 中间件接入 Redux DevTools。
+
+### Metro bundler 缓存清理
+
+遇到「 metro 报模块找不到 / 缓存陈旧 / HMR 不生效 」时清理缓存：
+
+```bash
+# 清理 Metro 缓存并重启
+npm start -- --reset-cache
+# 或显式
+npx react-native start --reset-cache
+
+# 清理 watchman（若使用 watchman）
+watchman watch-del-all
+
+# 清理 Gradle 缓存（Android 构建产物异常时）
+cd android && ./gradlew clean && rm -rf ~/.gradle/caches/transforms-3
+
+# 清理 npm 缓存（依赖变更后）
+npm cache clean --force
+rm -rf node_modules && npm install
+```
+
+- 切换分支后若出现 `Unable to resolve module`，优先 `--reset-cache`。
+- `react-native.config.js` 中 `watchFolders` 涵盖 monorepo 时，确保各 workspace 的 `node_modules` 符号链接一致（`npm install` 在仓库根执行）。
+
+## 贡献指南
+
+### Commit 规范
+
+本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范：
+
+```
+<type>(<scope>): <subject>
+
+<body?>      # 可选，说明动机 / 影响范围
+<footer?>    # 可选，关联 issue 或 BREAKING CHANGE
+```
+
+常用 `type`：
+
+| type | 用途 |
+|------|------|
+| feat | 新功能 |
+| fix | bug 修复 |
+| docs | 文档 |
+| style | 格式（不影响代码逻辑） |
+| refactor | 重构（非 feat / fix） |
+| perf | 性能优化 |
+| test | 测试相关 |
+| chore | 构建 / 工具 / 依赖 |
+| ci | CI 配置 |
+
+`scope` 示例：`android`、`mobile-rn`、`ios`、`navigation`、`store`。
+
+示例：
+```
+feat(android): add WebSocket transport for MobileRuntimeHostClient
+fix(android): migrate packagingOptions to AGP 8.x DSL
+docs(mobile-rn): add troubleshooting and contribution guide
+```
+
+- subject 使用祈使句、首字母小写、不超过 50 字符。
+- body 折行宽度 72 字符，说明 **why** 而非 what。
+- 关联 issue：`Closes #123`、`Refs #456`。
+
+### PR 流程
+
+1. **分支命名**：从 `feature/android-rn` 拉取子分支，命名 `feat/<scope>-<short>`、`fix/<scope>-<short>` 或 `chore/<topic>`。
+2. **本地验证**：提交前必须通过：
+   ```bash
+   npm run typecheck   # tsc --noEmit
+   npm run lint        # biome lint
+   npm test            # jest
+   npm run android     # 至少能在模拟器上构建成功
+   ```
+3. **提交**：按上述 Conventional Commits 规范撰写 commit，避免「WIP」「fix lint」等无意义提交；多个小改动合并为一个语义化 commit。
+4. **推送并创建 PR**：
+   ```bash
+   git push -u origin feat/navigation-chat
+   # 通过 GitHub CLI
+   gh pr create --base feature/android-rn \
+     --title "feat(android): add chat transport" \
+     --body "## 背景\n## 改动\n## 验证\n- [x] typecheck\n- [x] lint\n- [x] test\n- [x] android build"
+   ```
+5. **Review 要求**：
+   - 至少一名 reviewer 通过。
+   - CI（typecheck / lint / test / build）全绿。
+   - PR 描述包含「改动」「测试方式」「风险」三段。
+6. **合并策略**：优先 `Squash and merge`，保留清晰的 commit 历史；禁用 `merge commit` 以免污染线性历史。
+7. **发布**：合并后由维护者打 tag `mobile-rn-vX.Y.Z`，触发 release workflow。
+
+### 代码风格
+
+- TypeScript strict 模式，禁止 `any`（除非有明确注释说明）。
+- 使用 `biome` 进行格式化与 lint，提交前运行 `npm run lint -- --write`。
+- 组件优先函数式 + Hooks，避免 class 组件。
+- 跨平台代码通过 `Platform.OS` 分支，公共逻辑放入 `@maka/core`。
+
+---
+
+如遇本指南未覆盖的问题，请先检索 `.hive/` 内的既有记录与 `team recall`，再提 issue。
