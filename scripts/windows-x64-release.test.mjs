@@ -105,3 +105,44 @@ test('release tooling accepts complete p12 signing mode', () => {
   assert.ok(p12SigningEnvironment.CSC_LINK);
   assert.ok(p12SigningEnvironment.CSC_KEY_PASSWORD);
 });
+
+test('release tooling escapes an apostrophe in exePath before embedding it into a PowerShell -Command (W-6)', async () => {
+  // PowerShell single-quoted strings escape an embedded `'` by doubling it
+  // (`''`). verify-windows-x64.mjs builds the PowerShell ProductVersion /
+  // architecture / Authenticode commands by interpolating exePath inside
+  // single quotes; a path with an apostrophe (e.g. a user dir like
+  // C:\Users\Bob's\Maka-win-unpacked) must be escaped so the `-Command` stays
+  // well-formed. The path is built from trusted inputs in this script, so this
+  // is a defensive guard — the test locks the psQuotePath behavior down.
+  const { verifyPackagedWinApp } = await import(new URL('verify-windows-x64.mjs', import.meta.url));
+
+  const seenScripts = [];
+  await assert.rejects(
+    verifyPackagedWinApp("/tmp/O'Brien/Maka-win-unpacked", {
+      run: async (command, args) => {
+        if (command === 'powershell.exe') {
+          const script = args.join(' ');
+          seenScripts.push(script);
+          if (script.includes('ProductVersion')) return { stdout: '9.9.9\n', stderr: '' };
+          if (script.includes('0x8664')) return { stdout: 'arch=x64\n', stderr: '' };
+          if (script.includes('Get-AuthenticodeSignature')) return { stdout: 'Valid\n', stderr: '' };
+          return { stdout: '', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      },
+      requirePath: async () => {},
+      forbidPath: async () => {},
+      smokeRenderer: async () => {},
+      smokeFilesystemWorker: async () => {},
+      verifySignature: async () => {},
+    }),
+    /Expected app version/,
+  );
+
+  // The three PowerShell commands must embed the apostrophe as a doubled
+  // `''` (PowerShell single-quote escape) — never a bare `'`. If any script
+  // contains the unescaped path, the escaping regressed.
+  const joined = seenScripts.join('\n');
+  assert.ok(joined.includes("O''Brien"), 'apostrophe in exePath is doubled for PowerShell');
+  assert.doesNotMatch(joined, /O'Brien/, 'no unescaped apostrophe reaches PowerShell');
+});
