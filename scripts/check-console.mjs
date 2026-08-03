@@ -127,6 +127,14 @@ const ALLOW = new Map([
     'packages/runtime-host/src/server/host-kernel.ts',
     'Host shutdown failure diagnostics print the full nested AggregateError chain (Node truncates it to [errors]: [Array] by default); error metadata only, no secrets (PR1760).',
   ],
+  [
+    'apps/desktop/src/main/tray.ts',
+    'Windows tray icon load / destroy diagnostics (icon-missing, empty-image, destroy failure); win32 main-process only, paths are bundled assets, no secrets.',
+  ],
+  [
+    'apps/desktop/src/main/windows-userdata-redirect.ts',
+    'W-4: userData Roaming→Local redirect warn when LOCALAPPDATA is missing or setPath fails; main-process only, no secrets (the warning text itself documents the credential-roam risk).',
+  ],
 ]);
 
 async function walk(root) {
