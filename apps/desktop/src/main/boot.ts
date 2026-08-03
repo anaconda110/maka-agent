@@ -161,29 +161,13 @@ import {
 import { isComputerUseRealModelE2e, isE2e, isIsolatedE2e } from './startup-context.js';
 import { resolveDesktopStorageRoot } from './storage-root-startup.js';
 import { openDesktopExecutionStoreWiring } from './execution-store-wiring.js';
+import { redirectWindowsUserData } from './windows-userdata-redirect.js';
 
-// Windows: Electron's default `userData` is `%APPDATA%\Maka` (Roaming), which
-// a domain-managed profile can sync across machines. Workspace state — and
-// especially `credentials.json` — must not roam: a copied-roaming credential
-// file is exactly the kind of leak the Local vs Roaming split exists to
-// prevent. Redirect `userData` to `%LOCALAPPDATA%\Maka` on win32 before any
-// store / credential / settings path is derived from it. This also moves
-// every other workspace SQLite / artifact under Local, which is what we
-// want for an app whose state is tied to the machine, not the user profile.
-// Done before `buildInfo` so the first `app.getPath('userData')` below sees
-// the redirected path.
-if (process.platform === 'win32' && process.env.MAKA_WINDOWS_KEEP_ROAMING !== '1') {
-  try {
-    const localAppData = process.env.LOCALAPPDATA;
-    if (localAppData) {
-      app.setPath('userData', join(localAppData, app.getName()));
-    }
-  } catch (error) {
-    console.warn(
-      `[boot] failed to redirect userData to Local on Windows: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
+// Windows: redirect `userData` to `%LOCALAPPDATA%\Maka` before any store /
+// credential / settings path is derived from it. Done before `buildInfo` so
+// the first `app.getPath('userData')` below sees the redirected path.
+// See windows-userdata-redirect.ts for the full rationale + escape hatch.
+redirectWindowsUserData(app);
 
 const buildInfo = resolveBuildInfo(app.isPackaged, app.getAppPath());
 
