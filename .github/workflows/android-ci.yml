@@ -5,6 +5,7 @@ on:
     branches: [feature/android-rn]
   pull_request:
     branches: [feature/android-rn]
+  workflow_dispatch:
 
 concurrency:
   group: android-ci-${{ github.workflow }}-${{ github.ref }}
@@ -35,3 +36,84 @@ jobs:
       - name: Lint
         working-directory: apps/mobile-rn
         run: npx biome lint .
+
+  build-apk:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - run: npm ci --ignore-scripts
+      - name: Install mobile-rn deps
+        working-directory: apps/mobile-rn
+        run: npm install --ignore-scripts
+      - name: Typecheck
+        working-directory: apps/mobile-rn
+        run: npx tsc --noEmit
+      - name: Generate debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+      - name: Gradle wrapper check
+        working-directory: apps/mobile-rn/android
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            gradle wrapper --gradle-version 8.13
+          fi
+          ls -la gradle/wrapper/
+      - name: Assemble release APK
+        working-directory: apps/mobile-rn/android
+        run: ./gradlew assembleRelease --no-daemon
+      - name: Locate built APKs
+        id: apk
+        run: |
+          set -e
+          mkdir -p artifacts
+          apk_dir="apps/mobile-rn/android/app/build/outputs/apk/release"
+          ls -la "$apk_dir"
+          cp "$apk_dir"/*.apk artifacts/
+          echo "APK_DIR=$apk_dir" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  upload-release:
+    needs: build-apk
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-apk
+          path: artifacts
+      - name: Upload APKs to release v0.1.0-android.1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ls -la artifacts
+          gh release upload v0.1.0-android.1 artifacts/*.apk --clobber
