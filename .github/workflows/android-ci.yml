@@ -72,13 +72,16 @@ jobs:
             -keyalg RSA -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
-      - name: Gradle wrapper check
+      - name: Gradle wrapper (regenerate standard script)
         working-directory: apps/mobile-rn/android
         run: |
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            gradle wrapper --gradle-version 8.13
-          fi
-          ls -la gradle/wrapper/
+          # The committed gradlew is a non-standard, broken script that mangles
+          # -classpath (drops the leading 'c'). Regenerate the standard Gradle
+          # wrapper using a system gradle to overwrite gradlew / gradlew.bat /
+          # gradle-wrapper.jar with the canonical 8.13 versions.
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          chmod +x gradlew
+          ls -la gradlew gradle/wrapper/
       - name: Assemble release APK
         working-directory: apps/mobile-rn/android
         run: ./gradlew assembleRelease --no-daemon
