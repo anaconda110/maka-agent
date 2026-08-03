@@ -6,14 +6,6 @@ const p12SigningEnvironment = {
   CSC_KEY_PASSWORD: 'password',
 };
 
-const azureSigningEnvironment = {
-  AZURE_TRUSTED_SIGNING_ACCOUNT: 'maka-signing',
-  AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: 'release',
-  AZURE_TRUSTED_SIGNING_CLIENT_ID: '00000000-0000-0000-0000-000000000000',
-  AZURE_TRUSTED_SIGNING_CLIENT_SECRET: 'secret',
-  AZURE_TRUSTED_SIGNING_TENANT_ID: '00000000-0000-0000-0000-000000000000',
-};
-
 test('release tooling fails closed on unsupported hosts, signing, and architecture', async () => {
   const { packageWindowsX64 } = await import(new URL('package-windows-x64.mjs', import.meta.url));
   const { verifyPackagedWinApp } = await import(new URL('verify-windows-x64.mjs', import.meta.url));
@@ -24,7 +16,7 @@ test('release tooling fails closed on unsupported hosts, signing, and architectu
   );
   await assert.rejects(
     packageWindowsX64({ platform: 'win32', arch: 'x64', env: {} }),
-    /p12 signing|Azure Trusted Signing/,
+    /p12 signing/,
   );
   await assert.rejects(
     packageWindowsX64({
@@ -33,14 +25,6 @@ test('release tooling fails closed on unsupported hosts, signing, and architectu
       env: { CSC_LINK: 'base64-certificate' },
     }),
     /p12 signing is partially configured/,
-  );
-  await assert.rejects(
-    packageWindowsX64({
-      platform: 'win32',
-      arch: 'x64',
-      env: { AZURE_TRUSTED_SIGNING_ACCOUNT: 'maka-signing' },
-    }),
-    /Azure Trusted Signing is partially configured/,
   );
   await assert.rejects(
     packageWindowsX64({ platform: 'darwin', arch: 'x64', env: p12SigningEnvironment }),
@@ -117,8 +101,7 @@ test('release tooling rejects non-x64 and unsigned Windows binaries', async () =
   );
 });
 
-test('release tooling accepts either complete signing mode', () => {
+test('release tooling accepts complete p12 signing mode', () => {
   assert.ok(p12SigningEnvironment.CSC_LINK);
   assert.ok(p12SigningEnvironment.CSC_KEY_PASSWORD);
-  assert.equal(Object.keys(azureSigningEnvironment).length, 5);
 });

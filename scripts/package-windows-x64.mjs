@@ -12,21 +12,13 @@ const requiredElectronLicensePaths = [
   join(electronDistributionDirectory, 'LICENSES.chromium.html'),
 ];
 
-// Signing mode A — p12 certificate via electron-builder's built-in signtool
-// integration. CSC_LINK is a base64-encoded p12 (or a path to one), and
-// CSC_KEY_PASSWORD is its password.
+// Release builds are signed with a p12 certificate via electron-builder's
+// built-in signtool integration. CSC_LINK is a base64-encoded p12 (or a path
+// to one), and CSC_KEY_PASSWORD is its password. Azure Trusted Signing is not
+// supported in this configuration; draft releases only need a p12 signature
+// and configuring the Azure path in electron-builder would otherwise ship an
+// incomplete signing chain (see .hive/win-code-review.md W-2).
 const p12SigningEnvironment = ['CSC_LINK', 'CSC_KEY_PASSWORD'];
-
-// Signing mode B — Azure Trusted Signing via AzureSignTool / electron-builder
-// `win.azureTrustedSigning`. Release builds require all five values so the
-// packager can request a signing certificate without further input.
-const azureSigningEnvironment = [
-  'AZURE_TRUSTED_SIGNING_ACCOUNT',
-  'AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE',
-  'AZURE_TRUSTED_SIGNING_CLIENT_ID',
-  'AZURE_TRUSTED_SIGNING_CLIENT_SECRET',
-  'AZURE_TRUSTED_SIGNING_TENANT_ID',
-];
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
@@ -55,27 +47,19 @@ function runCommand(command, args) {
 
 function resolveSigningMode(env) {
   const p12Missing = p12SigningEnvironment.filter((name) => !env[name]?.trim());
-  const azureMissing = azureSigningEnvironment.filter((name) => !env[name]?.trim());
-  // Require one complete signing mode. A partial configuration fails closed so
-  // a release cannot silently ship an unsigned binary.
-  if (p12Missing.length === 0 && azureMissing.length === azureSigningEnvironment.length) {
+  // Release builds require a complete p12 signing configuration. A partial
+  // configuration fails closed so a release cannot silently ship an unsigned
+  // binary. Azure Trusted Signing is intentionally not supported here.
+  if (p12Missing.length === 0) {
     return 'p12';
-  }
-  if (azureMissing.length === 0 && p12Missing.length === p12SigningEnvironment.length) {
-    return 'azure';
   }
   if (p12Missing.length < p12SigningEnvironment.length) {
     throw new Error(
       `p12 signing is partially configured; missing ${p12Missing.join(', ')}.`,
     );
   }
-  if (azureMissing.length < azureSigningEnvironment.length) {
-    throw new Error(
-      `Azure Trusted Signing is partially configured; missing ${azureMissing.join(', ')}.`,
-    );
-  }
   throw new Error(
-    'Release packaging requires either p12 signing (CSC_LINK + CSC_KEY_PASSWORD) or Azure Trusted Signing (AZURE_TRUSTED_SIGNING_*).',
+    'Release packaging requires p12 signing (CSC_LINK + CSC_KEY_PASSWORD). Azure Trusted Signing is not supported in this configuration.',
   );
 }
 
