@@ -1,0 +1,27 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [feature/windows-adapt]
+  pull_request:
+    branches: [feature/windows-adapt]
+
+concurrency:
+  group: windows-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm --workspace @maka/desktop run test:checks
+      - run: node --test "dist/main/**/*.test.js"
