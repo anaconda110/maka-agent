@@ -20,8 +20,16 @@
     <!-- Notifications (API 33+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Foreground service for long-running runtime-host sessions (optional, future). -->
+    <!-- Foreground service for long-running runtime-host sessions (optional, future).
+         Android 14 (targetSdk 34) requires a foregroundServiceType on the <service>
+         element plus the matching FOREGROUND_SERVICE_<type> sub-permission. The
+         intended use is long-running data-sync work (runtime-host sessions), so
+         the dataSync sub-permission is declared; the <service> element (with
+         android:foregroundServiceType="dataSync") will be added when the service
+         is implemented. Declaring the sub-permission now keeps the manifest
+         Android-14-compliant the moment the service is wired up. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".MainApplication"
