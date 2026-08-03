@@ -5,6 +5,10 @@ on:
     branches: [feature/windows-adapt]
   pull_request:
     branches: [feature/windows-adapt]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: windows-ci-${{ github.workflow }}-${{ github.ref }}
@@ -25,3 +29,64 @@ jobs:
       - run: npm run build
       - run: npm --workspace @maka/desktop run test:checks
       - run: node --test "dist/main/**/*.test.js"
+
+  build:
+    needs: build-and-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm --workspace @maka/desktop run build:main
+      - run: npm --workspace @maka/desktop run build:preload
+      - run: npm --workspace @maka/desktop run build:overlay
+      - run: npm --workspace @maka/desktop run build:renderer
+      - name: Package Windows installer (NSIS) with electron-builder
+        run: npx electron-builder --config apps/desktop/electron-builder.config.mjs --win --x64 --publish never
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.nsis
+          if-no-files-found: warn
+          retention-days: 14
+
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/windows-adapt'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: windows-installers
+      - name: Upload installers to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v0.1.2-win.1"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release ${tag} does not exist; creating draft release." >&2
+            gh release create "$tag" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "Maka 0.1.2 Windows Preview" \
+              --notes "Windows Preview installers (NSIS) built from commit ${GITHUB_SHA}."
+          fi
+          gh release upload "$tag" \
+            windows-installers/*.exe \
+            windows-installers/*.nsis \
+            --clobber
