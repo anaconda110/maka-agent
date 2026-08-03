@@ -11,13 +11,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 import {
   buildCaptureCommand,
   buildMarkerRegex,
+  captureWindowsPath,
   resolveShellEnv,
   selectLoginShell,
   selectWindowsShell,
+  type SpawnFn,
 } from '../shell-env.js';
 
 const MARK = '0123456789ab';
@@ -275,6 +279,175 @@ done
       }
     },
   );
+});
+
+describe('captureWindowsPath', () => {
+  // The PowerShell capture command embeds the random marker twice; the mock
+  // spawn extracts it from the argv so tests can echo a marker-wrapped body
+  // that matches whatever random mark the function generated this run. Works
+  // for both the PowerShell branch (`'''<mark>''`) and the POSIX branch
+  // (`"<mark>"`): a 12-hex-char run flanked by quotes on both sides.
+  const MARKER_RE = /["']([0-9a-f]{12})["']/;
+
+  function extractMark(argv: string[]): string | undefined {
+    // The command is the last argv element: `& '<execPath>' -p '''<mark>'' + ...`
+    const command = argv[argv.length - 1];
+    if (typeof command !== 'string') return undefined;
+    const match = command.match(MARKER_RE);
+    return match ? match[1] : undefined;
+  }
+
+  // Builds a fake `spawn` that returns a mock ChildProcess whose stdout/stderr
+  // are PassThrough streams. The `script` callback runs on `setImmediate` so
+  // the promise executor has already attached its `data`/`close` listeners by
+  // the time the script writes to the streams — this keeps the data-before-close
+  // ordering deterministic. No real PowerShell is launched.
+  function makeMockSpawn(
+    script: (argv: string[], io: { stdout: PassThrough; stderr: PassThrough; emitClose: (code: number | null, signal?: NodeJS.Signals | null) => void; emitError: (err: Error) => void }) => void,
+  ): SpawnFn {
+    return (((
+      _cmd: string,
+      argv: string[],
+      _opts: unknown,
+    ) => {
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const ee = new EventEmitter();
+      const child = Object.assign(ee, {
+        stdout,
+        stderr,
+        pid: 99999,
+        kill: () => true,
+      });
+      const emitClose = (code: number | null, signal?: NodeJS.Signals | null) => {
+        process.nextTick(() => child.emit('close', code, signal ?? null));
+      };
+      const emitError = (err: Error) => {
+        process.nextTick(() => child.emit('error', err));
+      };
+      setImmediate(() => script(argv, { stdout, stderr, emitClose, emitError }));
+      return child;
+    }) as unknown) as SpawnFn;
+  }
+
+  it('rejects when the spawned shell exits with a non-zero code and does not surface stderr', async () => {
+    const spawnFn = makeMockSpawn((_argv, { stderr, stdout, emitClose }) => {
+      // Profile noise / secrets must never be retained or surfaced: the reject
+      // message must mention the exit code but never echo the stderr bytes.
+      stderr.write('secret-from-profile\r\n');
+      stderr.end();
+      stdout.end();
+      emitClose(23);
+    });
+    // captureWindowsPath rejects (it does not log); resolveShellEnv is the
+    // layer that converts the rejection into a console.warn, tested separately.
+    // `assert.rejects` returns void, so capture the rejection Error ourselves
+    // to assert the message does NOT carry shell-controlled stderr.
+    let captured: unknown;
+    try {
+      await captureWindowsPath(5_000, spawnFn);
+      assert.fail('expected captureWindowsPath to reject');
+    } catch (err) {
+      captured = err;
+    }
+    const message = captured instanceof Error ? captured.message : String(captured);
+    assert.match(message, /exited with code 23/);
+    // The rejection Error message must NOT carry shell-controlled stderr.
+    assert.doesNotMatch(message, /secret-from-profile/);
+  });
+
+  it('rejects when the spawned shell exits null (signal) with no marker in stdout', async () => {
+    const spawnFn = makeMockSpawn((_argv, { stdout, stderr, emitClose }) => {
+      // stdout contains noise but no flush markers → "could not find PATH markers".
+      stdout.write('Windows PowerShell\r\nCopyright (C) Microsoft Corporation.\r\n');
+      stdout.end();
+      stderr.end();
+      emitClose(null, 'SIGTERM');
+    });
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /could not find PATH markers/);
+  });
+
+  it('rejects when stdout has no marker despite a zero exit code', async () => {
+    const spawnFn = makeMockSpawn((_argv, { stdout, stderr, emitClose }) => {
+      stdout.write('noise without any markers here');
+      stdout.end();
+      stderr.end();
+      emitClose(0);
+    });
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /could not find PATH markers/);
+  });
+
+  it('rejects when stdout contains a marker body that is not valid JSON', async () => {
+    const spawnFn = makeMockSpawn((argv, { stdout, stderr, emitClose }) => {
+      const mark = extractMark(argv);
+      assert.ok(mark, 'mock extracted the marker from the capture command');
+      const payload = `${mark}{not-json}${mark}`;
+      stdout.write(payload);
+      stdout.end();
+      stderr.end();
+      emitClose(0);
+    });
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /failed to parse Windows PATH JSON/);
+  });
+
+  it('rejects when the captured JSON has an empty PATH', async () => {
+    const spawnFn = makeMockSpawn((argv, { stdout, stderr, emitClose }) => {
+      const mark = extractMark(argv);
+      assert.ok(mark, 'mock extracted the marker from the capture command');
+      const payload = `${mark}${JSON.stringify({ PATH: '' })}${mark}`;
+      stdout.write(payload);
+      stdout.end();
+      stderr.end();
+      emitClose(0);
+    });
+    // The empty-PATH validation is separate from JSON.parse: a valid JSON
+    // body with `PATH: ''` parses fine but fails the non-empty PATH check,
+    // surfacing the dedicated "did not provide PATH" message rather than
+    // being swallowed by the parse catch (a prior bug where the validation
+    // `throw` lived inside the parse `try` and was masked as a parse failure).
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /did not provide PATH/);
+  });
+
+  it('rejects when stdout exceeds the 64KiB capture bound', async () => {
+    const spawnFn = makeMockSpawn((_argv, { stdout, stderr, emitClose }) => {
+      // Emit >64KiB of marker-free noise on stderr (counted toward the bound).
+      // The bound rejection must win over the subsequent close(0).
+      stderr.write(Buffer.alloc(70 * 1024, 0x41));
+      stderr.end();
+      stdout.end();
+      emitClose(0);
+    });
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /shell output exceeded 65536 bytes/);
+  });
+
+  it('rejects when the spawn itself errors (missing PowerShell binary)', async () => {
+    const spawnFn = makeMockSpawn((_argv, { emitError }) => {
+      emitError(new Error('spawn powershell.exe ENOENT'));
+    });
+    await assert.rejects(captureWindowsPath(5_000, spawnFn), /failed to spawn/);
+  });
+
+  it('rejects when the timeout fires before the shell settles', async () => {
+    const spawnFn = makeMockSpawn(() => {
+      // Never emit close; the timeout must drive the rejection.
+    });
+    await assert.rejects(captureWindowsPath(50, spawnFn), /timed out after 50ms/);
+  });
+
+  it('resolves with the captured PATH when the markers round-trip cleanly', async () => {
+    const resolvedPath = 'C:\\Windows\\System32;C:\\Users\\me\\scoop\\shims';
+    const spawnFn = makeMockSpawn((argv, { stdout, stderr, emitClose }) => {
+      const mark = extractMark(argv);
+      assert.ok(mark, 'mock extracted the marker from the capture command');
+      const payload = `${mark}${JSON.stringify({ PATH: resolvedPath })}${mark}`;
+      stdout.write(payload);
+      stdout.end();
+      stderr.end();
+      emitClose(0);
+    });
+    const result = await captureWindowsPath(5_000, spawnFn);
+    assert.equal(result, resolvedPath);
+  });
 });
 
 describe('selectLoginShell', () => {

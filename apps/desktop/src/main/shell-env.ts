@@ -316,7 +316,12 @@ export function selectWindowsShell(inheritedComSpec?: string): string {
  * On any failure the function throws and `resolveShellEnv` keeps the
  * inherited PATH, so the app still boots — it just may miss user PATH.
  */
-async function captureWindowsPath(timeoutMs: number): Promise<string> {
+// Type alias for the spawn subset captureWindowsPath needs. Exported so tests
+// can build a mock child without depending on Node's internal ChildProcess
+// type surface.
+export type SpawnFn = typeof spawn;
+
+export async function captureWindowsPath(timeoutMs: number, spawnFn: SpawnFn = spawn): Promise<string> {
   const shell = selectWindowsShell(process.env.MAKA_WINDOWS_SHELL);
   const shellName = basename(shell);
   // buildCaptureCommand already knows how to quote PowerShell single-quoted
@@ -331,7 +336,7 @@ async function captureWindowsPath(timeoutMs: number): Promise<string> {
   };
 
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(shell, [...shellArgs, command], {
+    const child = spawnFn(shell, [...shellArgs, command], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
       windowsHide: true,
@@ -399,15 +404,18 @@ async function captureWindowsPath(timeoutMs: number): Promise<string> {
         return;
       }
 
+      let parsed: Record<string, string>;
       try {
-        const parsed = JSON.parse(match[1]) as Record<string, string>;
-        if (typeof parsed.PATH !== 'string' || parsed.PATH.length === 0) {
-          throw new Error('captured Windows shell did not provide PATH');
-        }
-        succeed(parsed.PATH);
+        parsed = JSON.parse(match[1]) as Record<string, string>;
       } catch {
         fail(new Error('failed to parse Windows PATH JSON'));
+        return;
       }
+      if (typeof parsed.PATH !== 'string' || parsed.PATH.length === 0) {
+        fail(new Error('captured Windows shell did not provide PATH'));
+        return;
+      }
+      succeed(parsed.PATH);
     });
 
     timer = setTimeout(() => {
