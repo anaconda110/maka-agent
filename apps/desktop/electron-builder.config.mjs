@@ -124,8 +124,9 @@ export default {
     artifactName: 'Maka-${version}-win-x64-portable.${ext}',
   },
   // node-pty ships prebuilt binaries (prebuilds/win32-x64/*.node); skip
-  // npmRebuild to avoid requiring Visual Studio C++ Build Tools.
-  npmRebuild: false,
+  // npmRebuild on Windows to avoid requiring Visual Studio C++ Build Tools.
+  // macOS still benefits from native rebuild for any future native modules.
+  ...(process.platform === 'win32' ? { npmRebuild: false } : {}),
   publish: [
     {
       provider: 'github',
