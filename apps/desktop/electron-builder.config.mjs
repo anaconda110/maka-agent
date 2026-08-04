@@ -1,7 +1,7 @@
 export default {
   appId: 'com.maka.desktop',
   productName: 'Maka',
-  artifactName: 'Maka-${version}-mac-${arch}.${ext}',
+  artifactName: 'Maka-${version}-${os}-${arch}.${ext}',
   asar: true,
   directories: {
     output: 'release',
@@ -104,6 +104,24 @@ export default {
     // DMG bytes. macOS updates use the ZIP, so do not publish a stale DMG hash
     // in latest-mac.yml.
     writeUpdateInfo: false,
+  },
+  win: {
+    target: [
+      { target: 'nsis', arch: ['x64'] },
+      { target: 'portable', arch: ['x64'] },
+    ],
+    icon: 'assets/icon.png',
+  },
+  nsis: {
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: 'Maka',
+  },
+  portable: {
+    artifactName: 'Maka-${version}-win-x64-portable.${ext}',
   },
   publish: [
     {

@@ -45,6 +45,7 @@
     "check:third-party-notices": "node scripts/generate-third-party-notices.mjs --check",
     "check:release": "npm run check:stale && npm run check:third-party-notices && node scripts/check-dead-css.mjs --check",
     "package:macos-arm64": "node scripts/package-macos-arm64.mjs",
+    "package:windows-x64": "node scripts/package-windows-x64.mjs",
     "verify:macos-arm64": "node scripts/verify-macos-arm64-dmg.mjs",
     "measure:session-bundle": "node scripts/measure-session-bundle.mjs",
     "astryx:theme": "node scripts/build-astryx-theme.mjs",
