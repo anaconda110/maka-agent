@@ -123,6 +123,9 @@ export default {
   portable: {
     artifactName: 'Maka-${version}-win-x64-portable.${ext}',
   },
+  // node-pty ships prebuilt binaries (prebuilds/win32-x64/*.node); skip
+  // npmRebuild to avoid requiring Visual Studio C++ Build Tools.
+  npmRebuild: false,
   publish: [
     {
       provider: 'github',
