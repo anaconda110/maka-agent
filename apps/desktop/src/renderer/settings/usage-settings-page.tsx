@@ -401,14 +401,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     window.maka.connections.list().then((conns) => {
       const models = new Set<string>();
       for (const conn of conns) {
+        if (!conn.enabled) continue;
+        // Only show enabled models from enabledModelIds
         if (conn.enabledModelIds) {
           conn.enabledModelIds.forEach((id) => models.add(`${conn.slug}:${id}`));
-        }
-        if (conn.models) {
-          conn.models.forEach((m) => models.add(`${conn.slug}:${m.id}`));
-        }
-        if (conn.defaultModel) {
-          models.add(`${conn.slug}:${conn.defaultModel}`);
         }
       }
       setConnectionModels(models);
