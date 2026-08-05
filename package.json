@@ -47,7 +47,6 @@
     "package:macos-arm64": "node scripts/package-macos-arm64.mjs",
     "package:windows-x64": "node scripts/package-windows-x64.mjs",
     "verify:macos-arm64": "node scripts/verify-macos-arm64-dmg.mjs",
-    "package:windows-x64": "node scripts/package-windows-x64.mjs",
     "verify:windows-x64": "node scripts/verify-windows-x64.mjs",
     "measure:session-bundle": "node scripts/measure-session-bundle.mjs",
     "astryx:theme": "node scripts/build-astryx-theme.mjs",
