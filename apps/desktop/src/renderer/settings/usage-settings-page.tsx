@@ -56,6 +56,7 @@ export function UsageSettingsPage(props: {
   const [refreshing, setRefreshing] = useState(false);
   const usageRefreshGuard = useActionGuard<'refresh'>();
   const stats = props.stats;
+  const [pricingCount, setPricingCount] = useState(0);
   const toast = useToast();
   const {
     draft: usageDraft,
@@ -216,7 +217,7 @@ export function UsageSettingsPage(props: {
 
         {usageDraft.activeTab === 'pricing' ? (
           <div className="settingsUsageTabPanel">
-            <UsagePricingPanel stats={stats} copy={copy} />
+            <UsagePricingPanel stats={stats} copy={copy} onCountChange={setPricingCount} />
           </div>
         ) : null}
       </div>
@@ -379,7 +380,7 @@ function UsageToolsPanel(props: { stats: UsageStats | null; copy: UsageSettingsC
   );
 }
 
-function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSettingsCopy }) {
+function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSettingsCopy; onCountChange?: (count: number) => void }) {
   const toast = useToast();
   const [overrides, setOverrides] = useState<PricingConfig[]>([]);
   const [loading, setLoading] = useState(false);
@@ -401,6 +402,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     try {
       const result = await window.maka.usage.listPricingOverrides();
       setOverrides(Array.isArray(result) ? result : []);
+      if (props.onCountChange) props.onCountChange(Array.isArray(result) ? result.length : 0);
       console.log("[pricing] loaded overrides:", result);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
