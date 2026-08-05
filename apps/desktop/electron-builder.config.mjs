@@ -120,6 +120,9 @@ export default {
     // electron-updater skips the check when there is none. Adding a certificate
     // is then the whole change — the verification follows it.
   },
+  // node-pty requires Spectre-mitigated C++ libraries to compile from source.
+  // Use prebuilt binaries (prebuilds/win32-x64/*.node) instead.
+  npmRebuild: false,
   publish: [
     {
       provider: 'github',
