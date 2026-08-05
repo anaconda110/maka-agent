@@ -1410,6 +1410,57 @@ describe('buildComputerUseTools — the `maka_computer` MakaTool', () => {
     });
   });
 
+  test('semantic action recaptures a pictureless result for presentation', async () => {
+    const captures: boolean[] = [];
+    const presented: Array<CuRunResult | undefined> = [];
+    const backend = fakeBackend() as CuDispatchBackend & {
+      observeApp: NonNullable<CuDispatchBackend['observeApp']>;
+      captureObservation: NonNullable<CuDispatchBackend['captureObservation']>;
+      runSemantic: NonNullable<CuDispatchBackend['runSemantic']>;
+    };
+    backend.observeApp = async () => observation();
+    backend.runSemantic = async () => ({
+      outcome: { ok: true, tier: 'ax', verified: true },
+      observation: observation({
+        observationId: 'pictureless-post-action',
+        screenshot: undefined,
+      }),
+    });
+    backend.captureObservation = async (input) => {
+      captures.push(input.includeScreenshot);
+      return observation({ observationId: 'presentation-frame' });
+    };
+    const [tool] = buildComputerUseTools({
+      backend,
+      overlay: {
+        onActionBegin() {},
+        onActionEnd(_action, result) {
+          presented.push(result);
+        },
+      },
+    });
+    const observed = (await tool.impl({ action: 'observe', app: 'Fixture' } as never, ctx())) as {
+      text: string;
+    };
+
+    const result = (await tool.impl(
+      {
+        action: 'click_element',
+        observation_id: JSON.parse(observed.text).observation_id,
+        element_id: '5',
+      } as never,
+      ctx(),
+    )) as { screenshot?: { base64: string; mimeType: string } };
+
+    assert.deepEqual(captures, [true]);
+    assert.deepEqual(result.screenshot, {
+      base64: 'AA==',
+      mimeType: 'image/png',
+    });
+    assert.equal(presented.length, 1);
+    assert.ok(presented[0]?.observation?.screenshot);
+  });
+
   test('semantic set_value keeps its semantic action name in the model summary', async () => {
     const backend = fakeBackend() as CuDispatchBackend & {
       observeApp: NonNullable<CuDispatchBackend['observeApp']>;
@@ -1789,6 +1840,28 @@ describe('buildComputerUseTools — the `maka_computer` MakaTool', () => {
     const r = await callComputer(fakeBackend({ accessibility: false }), { action: 'wait' });
     assert.match(r.text, /permission_missing/);
     assert.match(r.text, /Accessibility/);
+  });
+
+  test('requests Accessibility once on first use while every action still preflights', async () => {
+    let preflights = 0;
+    let requests = 0;
+    const backend = fakeBackend({ accessibility: false });
+    backend.preflight = async () => {
+      preflights += 1;
+      return { accessibility: false, screenRecording: true };
+    };
+    backend.requestAccessibilityPermission = async () => {
+      requests += 1;
+    };
+    const [tool] = buildComputerUseTools({ backend });
+
+    const first = (await tool.impl({ action: 'wait' } as never, ctx())) as { text: string };
+    const second = (await tool.impl({ action: 'wait' } as never, ctx())) as { text: string };
+
+    assert.match(first.text, /permission_missing/);
+    assert.match(second.text, /permission_missing/);
+    assert.equal(preflights, 2);
+    assert.equal(requests, 1);
   });
 
   test('S12: a capture action fails closed when Screen Recording is not granted', async () => {

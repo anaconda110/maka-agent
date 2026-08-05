@@ -649,6 +649,7 @@ export function buildComputerUseTools(deps: {
   const presentationGenerations = new Map<string, number>();
   const pendingInvocationTurns = new Map<string, Set<string>>();
   let presentationQueue = Promise.resolve();
+  let accessibilityPermissionRequested = false;
   interface SessionObservationRecord {
     turnId: string;
     state: CuaFrameState;
@@ -1203,19 +1204,31 @@ export function buildComputerUseTools(deps: {
   ): Promise<CuObservation | undefined> {
     const observationLease = state.beforeObservation();
     if (!observationLease.ok) return undefined;
-    const captured =
-      result.observation ??
-      (deps.backend.captureObservation && record.appId && record.windowId
-        ? await deps.backend.captureObservation(
-            {
-              app: record.appId,
-              windowId: record.windowId,
-              includeScreenshot: true,
-            },
-            signal,
-            context,
-          )
-        : undefined);
+    let captured = result.observation;
+    if (
+      (!captured || (!captured.screenshot && !result.screenshot)) &&
+      deps.backend.captureObservation &&
+      record.appId &&
+      record.windowId
+    ) {
+      try {
+        captured = await deps.backend.captureObservation(
+          {
+            app: record.appId,
+            windowId: record.windowId,
+            includeScreenshot: true,
+          },
+          signal,
+          context,
+        );
+      } catch (error) {
+        // A pictureless post-dispatch observation is still authoritative state
+        // for the model. The mirror is best-effort, so failing its richer
+        // recapture must not discard that state or turn a completed action into
+        // an unknown outcome.
+        if (!captured) throw error;
+      }
+    }
     const fresh =
       captured && result.screenshot && !captured.screenshot
         ? { ...captured, screenshot: result.screenshot }
@@ -1624,6 +1637,16 @@ export function buildComputerUseTools(deps: {
           // S12: re-check TCC at action-start; cached "granted" is insufficient.
           const tcc = await deps.backend.preflight(abortSignal);
           if (!tcc.accessibility) {
+            if (!accessibilityPermissionRequested && deps.backend.requestAccessibilityPermission) {
+              accessibilityPermissionRequested = true;
+              try {
+                await deps.backend.requestAccessibilityPermission(abortSignal);
+              } catch {
+                // Prompting is best-effort presentation. The live preflight
+                // result remains the authority and still fails this action
+                // closed with the stable permission guidance below.
+              }
+            }
             return {
               text: 'maka_computer failed: permission_missing — Accessibility not granted (System Settings → Privacy & Security → Accessibility)',
             };
