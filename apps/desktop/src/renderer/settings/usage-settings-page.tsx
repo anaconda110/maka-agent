@@ -634,7 +634,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       ) : null}
     </div>
   );
-} cell helpers --
+}
+
+// -- Request-log cell helpers --
 
 function usageRequestKindLabel(kind: UsageStats['logs'][number]['kind'], copy: UsageSettingsCopy) {
   switch (kind) {
