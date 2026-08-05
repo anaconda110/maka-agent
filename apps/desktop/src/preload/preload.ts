@@ -49,6 +49,7 @@ import type {
   UpdateAppSettingsResult,
   UsageRange,
   UsageStats,
+  PricingConfig,
   E2eFixtureState,
   ArtifactBinaryReadResult,
   ArtifactChangedEvent,
@@ -1218,6 +1219,17 @@ const makaBridge = {
       | { ok: false; reason: 'invalid_id' | 'missing' | 'blocked_path' | 'not_file' | 'not_directory' | 'open_failed' }
     > {
       return ipcRenderer.invoke('skills:open', id, target);
+    },
+  },
+  usage: {
+    listPricingOverrides(): Promise<PricingConfig[]> {
+      return ipcRenderer.invoke('usage:pricing:list');
+    },
+    putPricingOverride(config: PricingConfig): Promise<PricingConfig> {
+      return ipcRenderer.invoke('usage:pricing:put', config);
+    },
+    resetPricingOverride(modelKey: string): Promise<void> {
+      return ipcRenderer.invoke('usage:pricing:reset', modelKey);
     },
   },
   // Embedded browser (P3). The native WebContentsView floats above the DOM; the
