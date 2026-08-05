@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Card,
   EmptyState,
@@ -18,6 +18,7 @@ import {
   type UpdateAppSettingsResult,
   type UsageRange,
   type UsageStats,
+  type PricingConfig,
 } from '@maka/core';
 import {
   Button,
@@ -379,18 +380,140 @@ function UsageToolsPanel(props: { stats: UsageStats | null; copy: UsageSettingsC
 }
 
 function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSettingsCopy }) {
+  const toast = useToast();
+  const [overrides, setOverrides] = useState<PricingConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [modelKey, setModelKey] = useState('');
+  const [inputUsdPer1M, setInputUsdPer1M] = useState('');
+  const [outputUsdPer1M, setOutputUsdPer1M] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadPricing = async () => {
+    setLoading(true);
+    try {
+      const result = await window.maka.usage.listPricingOverrides();
+      setOverrides(result);
+    } catch (error) {
+      toast.error(props.copy.tables.pricingLoadFailed, String(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPricing();
+    const listener = () => void loadPricing();
+    window.addEventListener('usage:pricing:changed', listener);
+    return () => window.removeEventListener('usage:pricing:changed', listener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSubmit() {
+    const key = modelKey.trim();
+    const input = Number(inputUsdPer1M);
+    const output = Number(outputUsdPer1M);
+    if (!key) {
+      toast.error(props.copy.tables.pricingValidationFailed, props.copy.tables.pricingModelKeyRequired);
+      return;
+    }
+    if (!Number.isFinite(input) || input < 0 || !Number.isFinite(output) || output < 0) {
+      toast.error(props.copy.tables.pricingValidationFailed, props.copy.tables.pricingRateInvalid);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await window.maka.usage.putPricingOverride({
+        modelKey: key,
+        inputUsdPer1M: input,
+        outputUsdPer1M: output,
+      });
+      toast.success(props.copy.tables.pricingAddSuccess);
+      setModelKey('');
+      setInputUsdPer1M('');
+      setOutputUsdPer1M('');
+      await loadPricing();
+    } catch (error) {
+      toast.error(props.copy.tables.pricingAddFailed, String(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleReset(modelKey: string) {
+    try {
+      await window.maka.usage.resetPricingOverride(modelKey);
+      toast.success(props.copy.tables.pricingResetSuccess);
+      await loadPricing();
+    } catch (error) {
+      toast.error(props.copy.tables.pricingResetFailed, String(error));
+    }
+  }
+
   return (
-    <UsageStatsTable
-      ariaLabel={props.copy.tables.pricingAria}
-      columns={[
-        { header: props.copy.tables.pricingHeaders[0], grow: true },
-        { header: props.copy.tables.pricingHeaders[1] },
-        { header: props.copy.tables.pricingHeaders[2], numeric: true },
-        { header: props.copy.tables.pricingHeaders[3], numeric: true },
-      ]}
-      rows={(props.stats?.pricing ?? []).map((row) => [row.provider, row.model, `$${row.inputPerMTokUsd}`, `$${row.outputPerMTokUsd}`])}
-      empty={{ Icon: BarChart3, title: props.copy.tables.noPricing, body: props.copy.tables.pricingEmptyBody }}
-    />
+    <div>
+      <Card className="settingsUsagePricingForm" padding={3}>
+        <div className="settingsUsagePricingFormRow">
+          <TextInput
+            value={modelKey}
+            onChange={setModelKey}
+            placeholder={props.copy.tables.pricingModelKeyPlaceholder}
+            label={props.copy.tables.pricingModelKeyLabel}
+            width="100%"
+          />
+          <TextInput
+            value={inputUsdPer1M}
+            onChange={setInputUsdPer1M}
+            placeholder={props.copy.tables.pricingInputPlaceholder}
+            label={props.copy.tables.pricingInputLabel}
+            width={120}
+          />
+          <TextInput
+            value={outputUsdPer1M}
+            onChange={setOutputUsdPer1M}
+            placeholder={props.copy.tables.pricingOutputPlaceholder}
+            label={props.copy.tables.pricingOutputLabel}
+            width={120}
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            isDisabled={submitting || loading}
+            onClick={handleSubmit}
+            label={props.copy.tables.pricingAddButton}
+          />
+        </div>
+      </Card>
+      {overrides.length > 0 ? (
+        <UsageStatsTable
+          ariaLabel={props.copy.tables.pricingAria}
+          columns={[
+            { header: props.copy.tables.pricingHeaders[0], grow: true },
+            { header: props.copy.tables.pricingHeaders[2], numeric: true },
+            { header: props.copy.tables.pricingHeaders[3], numeric: true },
+            { header: props.copy.tables.pricingResetButton },
+          ]}
+          rows={overrides.map((row) => [
+            row.modelKey,
+            `${row.inputUsdPer1M}`,
+            `${row.outputUsdPer1M}`,
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleReset(row.modelKey)}
+              label={props.copy.tables.pricingResetButton}
+            />,
+          ])}
+          empty={{ Icon: BarChart3, title: props.copy.tables.noPricing, body: props.copy.tables.pricingEmptyBody }}
+        />
+      ) : (
+        <EmptyState
+          icon={<BarChart3 />}
+          title={props.copy.tables.noPricing}
+          description={props.copy.tables.pricingEmptyBody}
+          className="settingsUsageEmpty"
+        />
+      )}
+    </div>
   );
 }
 

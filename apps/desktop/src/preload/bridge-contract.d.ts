@@ -36,6 +36,7 @@ import type {
   UpdateAppSettingsResult,
   UsageRange,
   UsageStats,
+  PricingConfig,
   E2eFixtureState,
   ArtifactBinaryReadResult,
   ArtifactChangedEvent,
@@ -790,6 +791,11 @@ export interface MakaBridge {
       | { ok: true; target: 'file' | 'directory' }
       | { ok: false; reason: 'invalid_id' | 'missing' | 'blocked_path' | 'not_file' | 'not_directory' | 'open_failed' }
     >;
+  };
+  usage: {
+    listPricingOverrides(): Promise<PricingConfig[]>;
+    putPricingOverride(config: PricingConfig): Promise<PricingConfig>;
+    resetPricingOverride(modelKey: string): Promise<void>;
   };
   browser: {
     setActiveSession(sessionId: string | null): void;
