@@ -515,12 +515,12 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setNewCacheRead('');
     setNewCacheWrite('');
   }
-  const allModels = (() => {
+  const allModels = useMemo(() => {
     const modelKeys = new Set<string>();
     overrides.forEach((o) => modelKeys.add(o.modelKey));
     connectionModels.forEach((m) => modelKeys.add(m));
-    return allModels.sort();
-  })();
+    return Array.from(modelKeys).sort();
+  }, [overrides, connectionModels]);
 
 function handleSaveNew() {
     const key = newModelKey.trim();
