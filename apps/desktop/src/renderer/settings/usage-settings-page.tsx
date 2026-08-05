@@ -88,7 +88,7 @@ export function UsageSettingsPage(props: {
     providers: stats?.byProvider.length ?? 0,
     models: stats?.byModel.length ?? 0,
     tools: stats?.byTool.length ?? 0,
-    pricing: 0,
+    pricing: pricingCount,
   };
 
   async function setRange(range: UsageRange) {
