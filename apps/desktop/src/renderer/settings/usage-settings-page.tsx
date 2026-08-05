@@ -19,6 +19,8 @@ import {
   type UsageRange,
   type UsageStats,
   type PricingConfig,
+  buildConnectionModelCatalogEntries,
+  connectionEnabledModelIds,
 } from '@maka/core';
 import {
   Button,
@@ -395,19 +397,26 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [newCacheWrite, setNewCacheWrite] = useState('');
   const [saving, setSaving] = useState(false);
   const [connectionModels, setConnectionModels] = useState<Set<string>>(new Set());
+  const [availableModels, setAvailableModels] = useState<Set<string>>(new Set());
+  const [scope, setScope] = useState<'enabled' | 'all'>('enabled');
 
   useEffect(() => {
-    // Load all models from user's connections
+    // Build two model sets from the user's connections:
+    //  - connectionModels: only enabled connections' enabled models (scope=enabled)
+    //  - availableModels:  every connection's full catalog (scope=all), incl. disabled
+    //    connections and models the user hasn't enabled
     window.maka.connections.list().then((conns) => {
-      const models = new Set<string>();
+      const enabled = new Set<string>();
+      const available = new Set<string>();
       for (const conn of conns) {
-        if (!conn.enabled) continue;
-        // Only show enabled models from enabledModelIds
-        if (conn.enabledModelIds) {
-          conn.enabledModelIds.forEach((id) => models.add(`${conn.slug}:${id}`));
+        for (const entry of buildConnectionModelCatalogEntries({ connection: conn })) {
+          available.add(`${conn.slug}:${entry.id}`);
         }
+        if (!conn.enabled) continue;
+        connectionEnabledModelIds(conn).forEach((id) => enabled.add(`${conn.slug}:${id}`));
       }
-      setConnectionModels(models);
+      setConnectionModels(enabled);
+      setAvailableModels(available);
     }).catch(() => {});
   }, []);
 
@@ -426,11 +435,6 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     try {
       const result = await window.maka.usage.listPricingOverrides();
       setOverrides(Array.isArray(result) ? result : []);
-      const keys = new Set<string>();
-      if (Array.isArray(result)) result.forEach((o) => keys.add(o.modelKey));
-      
-      connectionModels.forEach((m) => keys.add(m));
-      if (props.onCountChange) props.onCountChange(keys.size);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
     } finally {
@@ -444,12 +448,22 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Tab counter reflects the models shown in the table for the current scope.
+  useEffect(() => {
+    if (!props.onCountChange) return;
+    if (scope === 'all') {
+      const keys = new Set<string>(availableModels);
+      overrides.forEach((o) => keys.add(o.modelKey));
+      props.onCountChange(keys.size);
+    } else {
+      props.onCountChange(connectionModels.size);
+    }
+  }, [connectionModels, availableModels, overrides, scope, props.onCountChange]);
 
   async function handleSave(modelKey: string, inputUsdPer1M: number, outputUsdPer1M: number, cacheReadUsdPer1M?: number, cacheWriteUsdPer1M?: number) {
     setSaving(true);
     try {
       await window.maka.usage.putPricingOverride({ modelKey, inputUsdPer1M, outputUsdPer1M, ...(cacheReadUsdPer1M !== undefined ? { cacheReadUsdPer1M } : {}), ...(cacheWriteUsdPer1M !== undefined ? { cacheWriteUsdPer1M } : {}) });
-      
       await loadPricing();
     } catch (error) {
       toast.error(props.copy.tables.pricingAddFailed, String(error));
@@ -474,9 +488,20 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setEditingValue(value !== undefined ? String(value) : '');
   }
 
+  // Read one price field off a pricing row (used by every navigation path).
+  function fieldValue(row: PricingConfig | undefined, f: 'input' | 'output' | 'cacheRead' | 'cacheWrite') {
+    return f === 'input' ? row?.inputUsdPer1M : f === 'output' ? row?.outputUsdPer1M : f === 'cacheRead' ? row?.cacheReadUsdPer1M : row?.cacheWriteUsdPer1M;
+  }
+
+  // Commit the current edit, then start editing another cell (same or next row).
+  function moveTo(targetKey: string, targetField: 'input' | 'output' | 'cacheRead' | 'cacheWrite') {
+    saveEdit();
+    startEdit(targetKey, targetField, fieldValue(overrides.find((o) => o.modelKey === targetKey), targetField));
+  }
+
   const fieldOrder: Array<'input' | 'output' | 'cacheRead' | 'cacheWrite'> = ['input', 'output', 'cacheRead', 'cacheWrite'];
 
-  function saveEdit(goNext: boolean = false) {
+  function saveEdit() {
     if (!editingKey) return;
     const row = overrides.find((o) => o.modelKey === editingKey);
     const input = editingField === 'input' ? (editingValue.trim() ? Number(editingValue) : 0) : (row?.inputUsdPer1M ?? 0);
@@ -491,20 +516,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       return;
     }
     const savedKey = editingKey;
-    const savedField = editingField;
     setEditingKey('');
     setEditingField('');
-    void handleSave(savedKey, input, output, cacheRead, cacheWrite).then(() => {
-      if (goNext) {
-        const idx = fieldOrder.indexOf(savedField as any);
-        const nextField = fieldOrder[idx + 1];
-        if (nextField) {
-          const updatedRow = overrides.find((o) => o.modelKey === savedKey);
-          const nextValue = nextField === 'input' ? updatedRow?.inputUsdPer1M : nextField === 'output' ? updatedRow?.outputUsdPer1M : nextField === 'cacheRead' ? updatedRow?.cacheReadUsdPer1M : updatedRow?.cacheWriteUsdPer1M;
-          startEdit(savedKey, nextField, nextValue);
-        }
-      }
-    });
+    void handleSave(savedKey, input, output, cacheRead, cacheWrite);
   }
 
   function handleAddNew() {
@@ -516,13 +530,18 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setNewCacheWrite('');
   }
   const allModels = useMemo(() => {
-    const modelKeys = new Set<string>();
-    overrides.forEach((o) => modelKeys.add(o.modelKey));
-    connectionModels.forEach((m) => modelKeys.add(m));
-    return Array.from(modelKeys).sort();
-  }, [overrides, connectionModels]);
+    if (scope === 'all') {
+      // All available models (every connection's full catalog) plus every model
+      // that has a pricing override (even if its connection is now disabled).
+      const keys = new Set<string>(availableModels);
+      overrides.forEach((o) => keys.add(o.modelKey));
+      return Array.from(keys).sort();
+    }
+    // Default: only currently enabled models.
+    return Array.from(connectionModels).sort();
+  }, [connectionModels, availableModels, overrides, scope]);
 
-function handleSaveNew() {
+  function handleSaveNew() {
     const key = newModelKey.trim();
     const input = Number(newInput);
     const output = Number(newOutput);
@@ -542,50 +561,77 @@ function handleSaveNew() {
   }
 
   const placeholder = <span style={{ color: 'var(--text-3, #999)', fontSize: '0.85em' }}>{props.copy.tables.pricingClickToSet}</span>;
+  const fieldLabel: Record<'input' | 'output' | 'cacheRead' | 'cacheWrite', string> = {
+    input: props.copy.tables.pricingInputLabel,
+    output: props.copy.tables.pricingOutputLabel,
+    cacheRead: props.copy.tables.pricingCacheReadLabel,
+    cacheWrite: props.copy.tables.pricingCacheWriteLabel,
+  };
 
   function renderCell(modelKey: string, field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', value: number | undefined) {
     const isEditing = editingKey === modelKey && editingField === field;
     if (isEditing) {
       return (
         <TextInput
+          label={fieldLabel[field]}
+          isLabelHidden
           value={editingValue}
           onChange={setEditingValue}
           width={100}
-          onBlur={() => saveEdit(false)}
+          onBlur={() => saveEdit()}
           data-pricing-edit="true"
           onKeyDown={(e: any) => {
-          if (e.key === 'Enter') { e.preventDefault(); saveEdit(true); }
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const nextField = fieldOrder[fieldOrder.indexOf(field) + 1];
+            if (nextField) {
+              moveTo(modelKey, nextField);
+            } else {
+              const nextKey = allModels[allModels.indexOf(modelKey) + 1];
+              if (nextKey) moveTo(nextKey, 'input');
+              else saveEdit();
+            }
+          }
           else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
-            const dir = e.key === 'ArrowDown' ? 1 : -1;
-            saveEdit(false);
-            setTimeout(() => {
-              const idx = allModels.indexOf(modelKey);
-              const nextKey = allModels[idx + dir];
-              if (nextKey) {
-                const nextRow = overrides.find((o) => o.modelKey === nextKey);
-                const nextValue = field === 'input' ? nextRow?.inputUsdPer1M : field === 'output' ? nextRow?.outputUsdPer1M : field === 'cacheRead' ? nextRow?.cacheReadUsdPer1M : nextRow?.cacheWriteUsdPer1M;
-                startEdit(nextKey, field, nextValue);
-              }
-            }, 50);
+            const nextKey = allModels[allModels.indexOf(modelKey) + (e.key === 'ArrowDown' ? 1 : -1)];
+            if (nextKey) moveTo(nextKey, field);
           }
         }}
         />
       );
     }
     return (
-      <span
-        onClick={() => startEdit(modelKey, field, value)}
-        style={{ cursor: 'pointer' }}
-      >
-        {value !== undefined && value !== null ? value : placeholder}
+      <span>
+        {value ? value : placeholder}
       </span>
     );
+  }
+  // Spread onto a price <td> so the whole cell (incl. padding) is click-to-edit.
+  function editableCellProps(modelKey: string, field: 'input' | 'output' | 'cacheRead' | 'cacheWrite', value: number | undefined) {
+    return {
+      style: { padding: '8px 12px', textAlign: 'right' as const, borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' as const, cursor: 'pointer' },
+      onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+      onClick: () => { saveEdit(); startEdit(modelKey, field, value); },
+    };
   }
 
   return (
     <div>
-      {overrides.length > 0 || connectionModels.size > 0 || addingNew ? (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <SegmentedControl
+          label={props.copy.tables.pricingScopeLabel}
+          value={scope}
+          onChange={(value) => setScope(value as 'enabled' | 'all')}
+        >
+          <SegmentedControlItem value="enabled" label={props.copy.tables.pricingScopeEnabled} />
+          <SegmentedControlItem value="all" label={props.copy.tables.pricingScopeAll} />
+        </SegmentedControl>
+        {scope === 'all' ? (
+          <span style={{ color: 'var(--text-3, #999)', fontSize: '0.85em' }}>{props.copy.tables.pricingScopeAllHelp}</span>
+        ) : null}
+      </div>
+      {allModels.length > 0 || addingNew ? (
         <Card className="settingsUsageTable" padding={3}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
             <thead>
@@ -593,17 +639,17 @@ function handleSaveNew() {
                 <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingModelKeyLabel}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                  {props.copy.tables.pricingInputLabel}
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }} title={props.copy.tables.pricingInputLabel}>
+                  {props.copy.tables.pricingInputShort}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                  {props.copy.tables.pricingOutputLabel}
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }} title={props.copy.tables.pricingOutputLabel}>
+                  {props.copy.tables.pricingOutputShort}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                  {props.copy.tables.pricingCacheReadLabel}
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }} title={props.copy.tables.pricingCacheReadLabel}>
+                  {props.copy.tables.pricingCacheReadShort}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                  {props.copy.tables.pricingCacheWriteLabel}
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }} title={props.copy.tables.pricingCacheWriteLabel}>
+                  {props.copy.tables.pricingCacheWriteShort}
                 </th>
                 <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingResetButton}
@@ -614,21 +660,23 @@ function handleSaveNew() {
               {(() => {
                 return allModels.map((modelKey) => {
                   const row = overrides.find((o) => o.modelKey === modelKey);
+                  const colonIdx = modelKey.indexOf(':');
+                  const displayKey = colonIdx > 0 ? modelKey.slice(colonIdx + 1) : modelKey;
                   return (
                     <tr key={modelKey}>
-                      <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                        {modelKey}
+                      <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }} title={modelKey}>
+                        {displayKey}
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
+                      <td {...editableCellProps(modelKey, 'input', row?.inputUsdPer1M)}>
                         {renderCell(modelKey, 'input', row?.inputUsdPer1M)}
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
+                      <td {...editableCellProps(modelKey, 'output', row?.outputUsdPer1M)}>
                         {renderCell(modelKey, 'output', row?.outputUsdPer1M)}
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
+                      <td {...editableCellProps(modelKey, 'cacheRead', row?.cacheReadUsdPer1M)}>
                         {renderCell(modelKey, 'cacheRead', row?.cacheReadUsdPer1M)}
                       </td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
+                      <td {...editableCellProps(modelKey, 'cacheWrite', row?.cacheWriteUsdPer1M)}>
                         {renderCell(modelKey, 'cacheWrite', row?.cacheWriteUsdPer1M)}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
@@ -648,19 +696,19 @@ function handleSaveNew() {
               {addingNew ? (
                 <tr>
                   <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                    <TextInput value={newModelKey} onChange={setNewModelKey} placeholder={props.copy.tables.pricingModelKeyPlaceholder} width="100%" />
+                    <TextInput label={props.copy.tables.pricingModelKeyLabel} isLabelHidden value={newModelKey} onChange={setNewModelKey} placeholder={props.copy.tables.pricingModelKeyPlaceholder} width="100%" />
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                    <TextInput value={newInput} onChange={setNewInput} placeholder={props.copy.tables.pricingInputPlaceholder} width={100} />
+                    <TextInput label={props.copy.tables.pricingInputLabel} isLabelHidden value={newInput} onChange={setNewInput} placeholder={props.copy.tables.pricingInputPlaceholder} width={100} />
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                    <TextInput value={newOutput} onChange={setNewOutput} placeholder={props.copy.tables.pricingOutputPlaceholder} width={100} />
+                    <TextInput label={props.copy.tables.pricingOutputLabel} isLabelHidden value={newOutput} onChange={setNewOutput} placeholder={props.copy.tables.pricingOutputPlaceholder} width={100} />
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                    <TextInput value={newCacheRead} onChange={setNewCacheRead} placeholder={props.copy.tables.pricingCacheReadPlaceholder} width={100} />
+                    <TextInput label={props.copy.tables.pricingCacheReadLabel} isLabelHidden value={newCacheRead} onChange={setNewCacheRead} placeholder={props.copy.tables.pricingCacheReadPlaceholder} width={100} />
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
-                    <TextInput value={newCacheWrite} onChange={setNewCacheWrite} placeholder={props.copy.tables.pricingCacheWritePlaceholder} width={100} />
+                    <TextInput label={props.copy.tables.pricingCacheWriteLabel} isLabelHidden value={newCacheWrite} onChange={setNewCacheWrite} placeholder={props.copy.tables.pricingCacheWritePlaceholder} width={100} />
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>

@@ -18,7 +18,9 @@ export type UsageSettingsCopy = {
     pricingCancelButton: string;
     pricingCacheReadLabel: string; pricingCacheReadPlaceholder: string;
     pricingCacheWriteLabel: string; pricingCacheWritePlaceholder: string;
+    pricingInputShort: string; pricingOutputShort: string; pricingCacheReadShort: string; pricingCacheWriteShort: string;
     pricingClickToSet: string;
+    pricingScopeLabel: string; pricingScopeEnabled: string; pricingScopeAll: string; pricingScopeAllHelp: string;
     providerEmptyTitle: string; providerEmptyBody: string; modelEmptyTitle: string; modelEmptyBody: string;
     toolEmptyTitle: string; toolEmptyBody: string; pricingEmptyBody: string;
   };
@@ -46,7 +48,9 @@ const SETTINGS_USAGE_COPY = {
       pricingCancelButton: '取消',
       pricingCacheReadLabel: '缓存读 / 1M (USD)', pricingCacheReadPlaceholder: '可选',
       pricingCacheWriteLabel: '缓存写 / 1M (USD)', pricingCacheWritePlaceholder: '可选',
+      pricingInputShort: '输入 / 1M', pricingOutputShort: '输出 / 1M', pricingCacheReadShort: '缓存读 / 1M', pricingCacheWriteShort: '缓存写 / 1M',
       pricingClickToSet: '点击设置',
+      pricingScopeLabel: '显示范围', pricingScopeEnabled: '当前启用', pricingScopeAll: '全部', pricingScopeAllHelp: '显示所有可用模型，外加已配置过自定义价格（可能已停用）的模型',
       providerEmptyTitle: '暂无供应商用量', providerEmptyBody: '完成一次模型请求后，这里会按供应商聚合请求数、Token 与费用。',
       modelEmptyTitle: '暂无模型用量', modelEmptyBody: '完成一次模型请求后，这里会按模型聚合请求数、Token 与费用。',
       toolEmptyTitle: '暂无工具调用', toolEmptyBody: '智能体调用工具后，这里会按工具聚合调用次数、成功、错误与平均耗时。',
@@ -74,7 +78,9 @@ const SETTINGS_USAGE_COPY = {
       pricingCancelButton: 'Cancel',
       pricingCacheReadLabel: 'Cache Read / 1M (USD)', pricingCacheReadPlaceholder: 'optional',
       pricingCacheWriteLabel: 'Cache Write / 1M (USD)', pricingCacheWritePlaceholder: 'optional',
+      pricingInputShort: 'In', pricingOutputShort: 'Out', pricingCacheReadShort: 'C.Rd', pricingCacheWriteShort: 'C.Wr',
       pricingClickToSet: 'Click to set',
+      pricingScopeLabel: 'Show', pricingScopeEnabled: 'Enabled', pricingScopeAll: 'All', pricingScopeAllHelp: 'Show all available models plus any models that have a custom price set (even if their connection is now disabled)',
       providerEmptyTitle: 'No provider usage', providerEmptyBody: 'After a model request, provider request counts, tokens, and costs appear here.',
       modelEmptyTitle: 'No model usage', modelEmptyBody: 'After a model request, request counts, tokens, and costs appear here by model.',
       toolEmptyTitle: 'No tool calls', toolEmptyBody: 'After an agent calls a tool, calls, successes, errors, and average duration appear here by tool.',
