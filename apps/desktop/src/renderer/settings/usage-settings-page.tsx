@@ -498,7 +498,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
 
   return (
     <div>
-      {overrides.length > 0 || addingNew ? (
+      {(props.stats?.byModel?.length ?? 0) > 0 || overrides.length > 0 || addingNew ? (
         <Card className="settingsUsageTable" padding={3}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -524,13 +524,20 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
               </tr>
             </thead>
             <tbody>
-              {overrides.map((row) => (
-                <tr key={row.modelKey}>
+              {(() => {
+                const modelKeys = new Set<string>();
+                overrides.forEach((o) => modelKeys.add(o.modelKey));
+                (props.stats?.byModel ?? []).forEach((m) => modelKeys.add(m.model));
+                const allModels = Array.from(modelKeys).sort();
+                return allModels.map((modelKey) => {
+                  const row = overrides.find((o) => o.modelKey === modelKey);
+                  return (
+                <tr key={modelKey}>
                   <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
-                    {row.modelKey}
+                    {modelKey}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
-                    {editingKey === row.modelKey ? (
+                    {editingKey === modelKey ? (
                       <TextInput
                         value={editingInput}
                         onChange={setEditingInput}
@@ -538,15 +545,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '')}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row.inputUsdPer1M}
+                        {row?.inputUsdPer1M ?? ''}
                       </span>
                     )}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
-                    {editingKey === row.modelKey ? (
+                    {editingKey === modelKey ? (
                       <TextInput
                         value={editingOutput}
                         onChange={setEditingOutput}
@@ -554,15 +561,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row.outputUsdPer1M}
+                        {row?.outputUsdPer1M ?? ''}
                       </span>
                     )}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
-                    {editingKey === row.modelKey ? (
+                    {editingKey === modelKey ? (
                       <TextInput
                         value={editingCacheRead}
                         onChange={setEditingCacheRead}
@@ -570,15 +577,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row.cacheReadUsdPer1M ?? '-'}
+                        {row?.cacheReadUsdPer1M ?? ''}
                       </span>
                     )}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
-                    {editingKey === row.modelKey ? (
+                    {editingKey === modelKey ? (
                       <TextInput
                         value={editingCacheWrite}
                         onChange={setEditingCacheWrite}
@@ -586,15 +593,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row.cacheWriteUsdPer1M ?? '-'}
+                        {row?.cacheWriteUsdPer1M ?? ''}
                       </span>
                     )}
                   </td>
                   <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)' }}>
-                    {editingKey === row.modelKey ? (
+                    {editingKey === modelKey ? (
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                         <Button
                           variant="primary"
@@ -614,13 +621,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => void handleReset(row.modelKey)}
+                        onClick={() => void handleReset(modelKey)}
                         label={props.copy.tables.pricingResetButton}
                       />
                     )}
                   </td>
                 </tr>
-              ))}
+                  );
+                });
+              })()}
               {addingNew ? (
                 <tr>
                   <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
