@@ -457,7 +457,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setEditingValue(value !== undefined ? String(value) : '');
   }
 
-  function saveEdit() {
+  const fieldOrder: Array<'input' | 'output' | 'cacheRead' | 'cacheWrite'> = ['input', 'output', 'cacheRead', 'cacheWrite'];
+
+  function saveEdit(goNext: boolean = false) {
     if (!editingKey) return;
     const row = overrides.find((o) => o.modelKey === editingKey);
     const input = editingField === 'input' ? (editingValue.trim() ? Number(editingValue) : 0) : (row?.inputUsdPer1M ?? 0);
@@ -471,9 +473,21 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       setEditingField('');
       return;
     }
+    const savedKey = editingKey;
+    const savedField = editingField;
     setEditingKey('');
     setEditingField('');
-    void handleSave(editingKey, input, output, cacheRead, cacheWrite);
+    void handleSave(savedKey, input, output, cacheRead, cacheWrite).then(() => {
+      if (goNext) {
+        const idx = fieldOrder.indexOf(savedField as any);
+        const nextField = fieldOrder[idx + 1];
+        if (nextField) {
+          const updatedRow = overrides.find((o) => o.modelKey === savedKey);
+          const nextValue = nextField === 'input' ? updatedRow?.inputUsdPer1M : nextField === 'output' ? updatedRow?.outputUsdPer1M : nextField === 'cacheRead' ? updatedRow?.cacheReadUsdPer1M : updatedRow?.cacheWriteUsdPer1M;
+          startEdit(savedKey, nextField, nextValue);
+        }
+      }
+    });
   }
 
   function handleAddNew() {
@@ -514,9 +528,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
           value={editingValue}
           onChange={setEditingValue}
           width={100}
-          onBlur={saveEdit}
+          onBlur={() => saveEdit(false)}
           data-pricing-edit="true"
-          onKeyDown={(e: any) => { if (e.key === 'Enter') saveEdit(); }}
+          onKeyDown={(e: any) => { if (e.key === 'Enter') saveEdit(true); }}
         />
       );
     }
