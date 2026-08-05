@@ -15,6 +15,7 @@ export type UsageSettingsCopy = {
     pricingAddButton: string; pricingResetButton: string; pricingAddSuccess: string; pricingAddFailed: string; pricingResetSuccess: string; pricingResetFailed: string;
     pricingLoadFailed: string; pricingValidationFailed: string; pricingModelKeyRequired: string; pricingRateInvalid: string;
     pricingSelectExisting: string;
+    pricingCancelButton: string;
     providerEmptyTitle: string; providerEmptyBody: string; modelEmptyTitle: string; modelEmptyBody: string;
     toolEmptyTitle: string; toolEmptyBody: string; pricingEmptyBody: string;
   };
@@ -39,6 +40,7 @@ const SETTINGS_USAGE_COPY = {
       pricingAddButton: '添加', pricingResetButton: '重置', pricingAddSuccess: '定价已保存', pricingAddFailed: '保存定价失败', pricingResetSuccess: '已重置为内置价格', pricingResetFailed: '重置定价失败',
       pricingLoadFailed: '加载定价配置失败', pricingValidationFailed: '校验失败', pricingModelKeyRequired: '请输入模型标识', pricingRateInvalid: '价格必须为非负数字',
       pricingSelectExisting: '选择已有模型以编辑',
+      pricingCancelButton: '取消',
       providerEmptyTitle: '暂无供应商用量', providerEmptyBody: '完成一次模型请求后，这里会按供应商聚合请求数、Token 与费用。',
       modelEmptyTitle: '暂无模型用量', modelEmptyBody: '完成一次模型请求后，这里会按模型聚合请求数、Token 与费用。',
       toolEmptyTitle: '暂无工具调用', toolEmptyBody: '智能体调用工具后，这里会按工具聚合调用次数、成功、错误与平均耗时。',
@@ -63,6 +65,7 @@ const SETTINGS_USAGE_COPY = {
       pricingAddButton: 'Add', pricingResetButton: 'Reset', pricingAddSuccess: 'Pricing saved', pricingAddFailed: 'Failed to save pricing', pricingResetSuccess: 'Reset to built-in price', pricingResetFailed: 'Failed to reset pricing',
       pricingLoadFailed: 'Failed to load pricing', pricingValidationFailed: 'Validation failed', pricingModelKeyRequired: 'Model key is required', pricingRateInvalid: 'Rates must be non-negative numbers',
       pricingSelectExisting: 'Select existing model to edit',
+      pricingCancelButton: 'Cancel',
       providerEmptyTitle: 'No provider usage', providerEmptyBody: 'After a model request, provider request counts, tokens, and costs appear here.',
       modelEmptyTitle: 'No model usage', modelEmptyBody: 'After a model request, request counts, tokens, and costs appear here by model.',
       toolEmptyTitle: 'No tool calls', toolEmptyBody: 'After an agent calls a tool, calls, successes, errors, and average duration appear here by tool.',
