@@ -389,6 +389,8 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [submitting, setSubmitting] = useState(false);
   const [showModelList, setShowModelList] = useState(false);
 
+  const availableModels = (props.stats?.byModel ?? []).map((m) => m.model);
+
   const loadPricing = async () => {
     setLoading(true);
     try {
@@ -472,7 +474,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
               label={props.copy.tables.pricingModelKeyLabel}
               width="100%"
             />
-            {overrides.length > 0 ? (
+            {availableModels.length > 0 ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -481,7 +483,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                 style={{ position: 'absolute', right: 4, top: 4 }}
               />
             ) : null}
-            {showModelList && overrides.length > 0 ? (
+            {showModelList && availableModels.length > 0 ? (
               <div style={{
                 position: 'absolute',
                 top: '100%',
@@ -494,17 +496,17 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                 maxHeight: 200,
                 overflowY: 'auto',
               }}>
-                {overrides.map((o) => (
+                {availableModels.map((modelKey) => (
                   <div
-                    key={o.modelKey}
-                    onClick={() => handleSelectExisting(o.modelKey)}
+                    key={modelKey}
+                    onClick={() => { setModelKey(modelKey); setShowModelList(false); }}
                     style={{
                       padding: '8px 12px',
                       cursor: 'pointer',
                       borderBottom: '1px solid var(--border-1)',
                     }}
                   >
-                    {o.modelKey}
+                    {modelKey}
                   </div>
                 ))}
               </div>
