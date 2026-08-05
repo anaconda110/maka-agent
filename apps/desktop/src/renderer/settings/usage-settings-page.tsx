@@ -394,6 +394,26 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [newCacheRead, setNewCacheRead] = useState('');
   const [newCacheWrite, setNewCacheWrite] = useState('');
   const [saving, setSaving] = useState(false);
+  const [connectionModels, setConnectionModels] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    // Load all models from user's connections
+    window.maka.connections.list().then((conns) => {
+      const models = new Set<string>();
+      for (const conn of conns) {
+        if (conn.enabledModelIds) {
+          conn.enabledModelIds.forEach((id) => models.add(`${conn.slug}:${id}`));
+        }
+        if (conn.models) {
+          conn.models.forEach((m) => models.add(`${conn.slug}:${m.id}`));
+        }
+        if (conn.defaultModel) {
+          models.add(`${conn.slug}:${conn.defaultModel}`);
+        }
+      }
+      setConnectionModels(models);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (editingKey) {
@@ -413,6 +433,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       const keys = new Set<string>();
       if (Array.isArray(result)) result.forEach((o) => keys.add(o.modelKey));
       (props.stats?.byModel ?? []).forEach((m) => keys.add(m.model));
+      connectionModels.forEach((m) => keys.add(m));
       if (props.onCountChange) props.onCountChange(keys.size);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
@@ -546,7 +567,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
 
   return (
     <div>
-      {(props.stats?.byModel?.length ?? 0) > 0 || overrides.length > 0 || addingNew ? (
+      {(props.stats?.byModel?.length ?? 0) > 0 || overrides.length > 0 || connectionModels.size > 0 || addingNew ? (
         <Card className="settingsUsageTable" padding={3}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
             <thead>
@@ -576,6 +597,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                 const modelKeys = new Set<string>();
                 overrides.forEach((o) => modelKeys.add(o.modelKey));
                 (props.stats?.byModel ?? []).forEach((m) => modelKeys.add(m.model));
+                connectionModels.forEach((m) => modelKeys.add(m));
                 const allModels = Array.from(modelKeys).sort();
                 return allModels.map((modelKey) => {
                   const row = overrides.find((o) => o.modelKey === modelKey);
