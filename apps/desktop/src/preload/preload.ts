@@ -183,7 +183,7 @@ const makaBridge = {
     },
     /**
      * The single session-creation channel (#1433). `mode` names a
-     * product intent �?main derives the permission boundary, name and
+     * product intent — main derives the permission boundary, name and
      * labels it implies (`create-session-input.ts`); the renderer cannot
      * reach a boundary like `explore` by asking for it directly.
      */
@@ -490,7 +490,7 @@ const makaBridge = {
   // PR110b: onboarding snapshot + milestone IPCs. Renderer polls
   // `getSnapshot()` on app load and re-polls when
   // `sessions:changed` / `connections:changed` / settings change
-  // events fire. There is no push event for OnboardingState �?it is
+  // events fire. There is no push event for OnboardingState — it is
   // a derived projection and refresh latency is acceptable.
   onboarding: {
     getSnapshot(): Promise<OnboardingSnapshot> {
@@ -600,7 +600,7 @@ const makaBridge = {
   search: {
     // PR-SEARCH-2: local thread search. Renderer sends a `SearchRequest`
     // (source must be 'thread'); main responds with `SearchResult[]` or
-    // an error envelope. The query body never leaves the device �?the
+    // an error envelope. The query body never leaves the device — the
     // helper is local-only and the IPC handler never emits the query
     // into telemetry.
     thread(request: SearchRequest): Promise<SearchResult[] | { ok: false; reason: SearchErrorReason; message: string }> {
@@ -1229,7 +1229,7 @@ const makaBridge = {
   },
   // Embedded browser (P3). The native WebContentsView floats above the DOM; the
   // renderer panel only mirrors its strip's rect and drives navigation. No
-  // automation endpoint/secret is ever exposed here �?that stays main-internal.
+  // automation endpoint/secret is ever exposed here — that stays main-internal.
   browser: {
     /** Tell main which conversation this window shows, so it can validate targets. */
     setActiveSession(sessionId: string | null): void {
