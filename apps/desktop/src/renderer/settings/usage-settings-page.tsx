@@ -449,8 +449,28 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     }
   }
 
+  function handleSelectExisting(modelKey: string) {
+    const existing = overrides.find((o) => o.modelKey === modelKey);
+    if (existing) {
+      setModelKey(existing.modelKey);
+      setInputUsdPer1M(String(existing.inputUsdPer1M));
+      setOutputUsdPer1M(String(existing.outputUsdPer1M));
+    }
+  }
+
   return (
     <div>
+      {overrides.length > 0 ? (
+        <Card className="settingsUsagePricingForm" padding={3} style={{ marginBottom: 12 }}>
+          <Selector
+            value=""
+            label={props.copy.tables.pricingSelectExisting}
+            options={overrides.map((o) => ({ value: o.modelKey, label: o.modelKey }))}
+            width="100%"
+            onChange={(value) => handleSelectExisting(value)}
+          />
+        </Card>
+      ) : null}
       <Card className="settingsUsagePricingForm" padding={3}>
         <div className="settingsUsagePricingFormRow">
           <TextInput
