@@ -16,6 +16,8 @@ export type UsageSettingsCopy = {
     pricingLoadFailed: string; pricingValidationFailed: string; pricingModelKeyRequired: string; pricingRateInvalid: string;
     pricingSelectExisting: string;
     pricingCancelButton: string;
+    pricingCacheReadLabel: string; pricingCacheReadPlaceholder: string;
+    pricingCacheWriteLabel: string; pricingCacheWritePlaceholder: string;
     providerEmptyTitle: string; providerEmptyBody: string; modelEmptyTitle: string; modelEmptyBody: string;
     toolEmptyTitle: string; toolEmptyBody: string; pricingEmptyBody: string;
   };
@@ -41,6 +43,8 @@ const SETTINGS_USAGE_COPY = {
       pricingLoadFailed: '加载定价配置失败', pricingValidationFailed: '校验失败', pricingModelKeyRequired: '请输入模型标识', pricingRateInvalid: '价格必须为非负数字',
       pricingSelectExisting: '选择已有模型以编辑',
       pricingCancelButton: '取消',
+      pricingCacheReadLabel: '缓存读 / 1M (USD)', pricingCacheReadPlaceholder: '可选',
+      pricingCacheWriteLabel: '缓存写 / 1M (USD)', pricingCacheWritePlaceholder: '可选',
       providerEmptyTitle: '暂无供应商用量', providerEmptyBody: '完成一次模型请求后，这里会按供应商聚合请求数、Token 与费用。',
       modelEmptyTitle: '暂无模型用量', modelEmptyBody: '完成一次模型请求后，这里会按模型聚合请求数、Token 与费用。',
       toolEmptyTitle: '暂无工具调用', toolEmptyBody: '智能体调用工具后，这里会按工具聚合调用次数、成功、错误与平均耗时。',
@@ -66,6 +70,8 @@ const SETTINGS_USAGE_COPY = {
       pricingLoadFailed: 'Failed to load pricing', pricingValidationFailed: 'Validation failed', pricingModelKeyRequired: 'Model key is required', pricingRateInvalid: 'Rates must be non-negative numbers',
       pricingSelectExisting: 'Select existing model to edit',
       pricingCancelButton: 'Cancel',
+      pricingCacheReadLabel: 'Cache Read / 1M (USD)', pricingCacheReadPlaceholder: 'optional',
+      pricingCacheWriteLabel: 'Cache Write / 1M (USD)', pricingCacheWritePlaceholder: 'optional',
       providerEmptyTitle: 'No provider usage', providerEmptyBody: 'After a model request, provider request counts, tokens, and costs appear here.',
       modelEmptyTitle: 'No model usage', modelEmptyBody: 'After a model request, request counts, tokens, and costs appear here by model.',
       toolEmptyTitle: 'No tool calls', toolEmptyBody: 'After an agent calls a tool, calls, successes, errors, and average duration appear here by tool.',
