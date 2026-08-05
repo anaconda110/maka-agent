@@ -387,6 +387,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [inputUsdPer1M, setInputUsdPer1M] = useState('');
   const [outputUsdPer1M, setOutputUsdPer1M] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showModelList, setShowModelList] = useState(false);
 
   const loadPricing = async () => {
     setLoading(true);
@@ -402,9 +403,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
 
   useEffect(() => {
     void loadPricing();
+    const { ipcRenderer } = window.require('electron');
     const listener = () => void loadPricing();
-    window.addEventListener('usage:pricing:changed', listener);
-    return () => window.removeEventListener('usage:pricing:changed', listener);
+    ipcRenderer.on('usage:pricing:changed', listener);
+    return () => { ipcRenderer.off('usage:pricing:changed', listener); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -431,6 +433,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       setModelKey('');
       setInputUsdPer1M('');
       setOutputUsdPer1M('');
+      setShowModelList(false);
       await loadPricing();
     } catch (error) {
       toast.error(props.copy.tables.pricingAddFailed, String(error));
@@ -456,30 +459,59 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       setInputUsdPer1M(String(existing.inputUsdPer1M));
       setOutputUsdPer1M(String(existing.outputUsdPer1M));
     }
+    setShowModelList(false);
   }
 
   return (
     <div>
-      {overrides.length > 0 ? (
-        <Card className="settingsUsagePricingForm" padding={3} style={{ marginBottom: 12 }}>
-          <Selector
-            value=""
-            label={props.copy.tables.pricingSelectExisting}
-            options={overrides.map((o) => ({ value: o.modelKey, label: o.modelKey }))}
-            width="100%"
-            onChange={(value) => handleSelectExisting(value)}
-          />
-        </Card>
-      ) : null}
       <Card className="settingsUsagePricingForm" padding={3}>
         <div className="settingsUsagePricingFormRow">
-          <TextInput
-            value={modelKey}
-            onChange={setModelKey}
-            placeholder={props.copy.tables.pricingModelKeyPlaceholder}
-            label={props.copy.tables.pricingModelKeyLabel}
-            width="100%"
-          />
+          <div style={{ position: 'relative', flex: 1 }}>
+            <TextInput
+              value={modelKey}
+              onChange={setModelKey}
+              placeholder={props.copy.tables.pricingModelKeyPlaceholder}
+              label={props.copy.tables.pricingModelKeyLabel}
+              width="100%"
+            />
+            {overrides.length > 0 ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowModelList(!showModelList)}
+                label={showModelList ? '▲' : '▼'}
+                style={{ position: 'absolute', right: 4, top: 4 }}
+              />
+            ) : null}
+            {showModelList && overrides.length > 0 ? (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 10,
+                background: 'var(--surface-1)',
+                border: '1px solid var(--border-1)',
+                borderRadius: 4,
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}>
+                {overrides.map((o) => (
+                  <div
+                    key={o.modelKey}
+                    onClick={() => handleSelectExisting(o.modelKey)}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--border-1)',
+                    }}
+                  >
+                    {o.modelKey}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <TextInput
             value={inputUsdPer1M}
             onChange={setInputUsdPer1M}
