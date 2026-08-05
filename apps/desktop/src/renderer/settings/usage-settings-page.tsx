@@ -505,6 +505,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
           onChange={setEditingValue}
           width={100}
           onBlur={saveEdit}
+          autoFocus
           onKeyDown={(e: any) => { if (e.key === 'Enter') saveEdit(); }}
         />
       );
