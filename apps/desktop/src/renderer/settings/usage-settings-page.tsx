@@ -515,8 +515,15 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setNewCacheRead('');
     setNewCacheWrite('');
   }
+  const allModels = (() => {
+    const modelKeys = new Set<string>();
+    overrides.forEach((o) => modelKeys.add(o.modelKey));
+    connectionModels.forEach((m) => modelKeys.add(m));
+    return allModels.sort();
+  })();
+
   function navigateRow(currentKey: string, field: string, direction: number) {
-    const modelKeysList = Array.from(modelKeys);
+    const modelKeysList = allModels;
     const idx = modelKeysList.indexOf(currentKey);
     const nextKey = modelKeysList[idx + direction];
     if (nextKey) {
@@ -601,11 +608,6 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
             </thead>
             <tbody>
               {(() => {
-                const modelKeys = new Set<string>();
-                overrides.forEach((o) => modelKeys.add(o.modelKey));
-                
-                connectionModels.forEach((m) => modelKeys.add(m));
-                const allModels = Array.from(modelKeys).sort();
                 return allModels.map((modelKey) => {
                   const row = overrides.find((o) => o.modelKey === modelKey);
                   return (
