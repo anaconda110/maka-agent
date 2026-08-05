@@ -402,7 +402,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     try {
       const result = await window.maka.usage.listPricingOverrides();
       setOverrides(Array.isArray(result) ? result : []);
-      if (props.onCountChange) props.onCountChange(Array.isArray(result) ? result.length : 0);
+      const keys = new Set<string>();
+      if (Array.isArray(result)) result.forEach((o) => keys.add(o.modelKey));
+      (props.stats?.byModel ?? []).forEach((m) => keys.add(m.model));
+      if (props.onCountChange) props.onCountChange(keys.size);
       console.log("[pricing] loaded overrides:", result);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
@@ -500,25 +503,25 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     <div>
       {(props.stats?.byModel?.length ?? 0) > 0 || overrides.length > 0 || addingNew ? (
         <Card className="settingsUsageTable" padding={3}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
             <thead>
               <tr>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingModelKeyLabel}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingInputLabel}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingOutputLabel}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingCacheReadLabel}
                 </th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingCacheWriteLabel}
                 </th>
-                <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                   {props.copy.tables.pricingResetButton}
                 </th>
               </tr>
@@ -533,10 +536,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                   const row = overrides.find((o) => o.modelKey === modelKey);
                   return (
                 <tr key={modelKey}>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {modelKey}
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {editingKey === modelKey ? (
                       <TextInput
                         value={editingInput}
@@ -552,7 +555,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {editingKey === modelKey ? (
                       <TextInput
                         value={editingOutput}
@@ -568,7 +571,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {editingKey === modelKey ? (
                       <TextInput
                         value={editingCacheRead}
@@ -584,7 +587,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {editingKey === modelKey ? (
                       <TextInput
                         value={editingCacheWrite}
@@ -600,7 +603,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     {editingKey === modelKey ? (
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                         <Button
@@ -632,7 +635,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
               })()}
               {addingNew ? (
                 <tr>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <TextInput
                       value={newModelKey}
                       onChange={setNewModelKey}
@@ -640,7 +643,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       width="100%"
                     />
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <TextInput
                       value={newInput}
                       onChange={setNewInput}
@@ -648,7 +651,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       width={100}
                     />
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <TextInput
                       value={newOutput}
                       onChange={setNewOutput}
@@ -656,7 +659,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       width={100}
                     />
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <TextInput
                       value={newCacheRead}
                       onChange={setNewCacheRead}
@@ -664,7 +667,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       width={100}
                     />
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <TextInput
                       value={newCacheWrite}
                       onChange={setNewCacheWrite}
@@ -672,7 +675,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       width={100}
                     />
                   </td>
-                  <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)' }}>
+                  <td style={{ padding: '8px 12px', textAlign: 'center', borderBottom: '1px solid var(--border-1)', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                       <Button
                         variant="primary"
