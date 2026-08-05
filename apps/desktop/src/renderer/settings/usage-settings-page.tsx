@@ -396,7 +396,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setLoading(true);
     try {
       const result = await window.maka.usage.listPricingOverrides();
-      setOverrides(result);
+      setOverrides(Array.isArray(result) ? result : []);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
     } finally {
