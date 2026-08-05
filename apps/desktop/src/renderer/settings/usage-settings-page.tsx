@@ -522,19 +522,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     return allModels.sort();
   })();
 
-  function navigateRow(currentKey: string, field: string, direction: number) {
-    const modelKeysList = allModels;
-    const idx = modelKeysList.indexOf(currentKey);
-    const nextKey = modelKeysList[idx + direction];
-    if (nextKey) {
-      const nextRow = overrides.find((o) => o.modelKey === nextKey);
-      const nextValue = field === 'input' ? nextRow?.inputUsdPer1M : field === 'output' ? nextRow?.outputUsdPer1M : field === 'cacheRead' ? nextRow?.cacheReadUsdPer1M : nextRow?.cacheWriteUsdPer1M;
-      startEdit(nextKey, field, nextValue);
-    }
-  }
-
-
-  function handleSaveNew() {
+function handleSaveNew() {
     const key = newModelKey.trim();
     const input = Number(newInput);
     const output = Number(newOutput);
@@ -565,7 +553,23 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
           width={100}
           onBlur={() => saveEdit(false)}
           data-pricing-edit="true"
-          onKeyDown={(e: any) => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(true); } else if (e.key === 'ArrowDown') { e.preventDefault(); saveEdit(false); setTimeout(() => navigateRow(modelKey, field, 1), 50); } else if (e.key === 'ArrowUp') { e.preventDefault(); saveEdit(false); setTimeout(() => navigateRow(modelKey, field, -1), 50); } }}
+          onKeyDown={(e: any) => {
+          if (e.key === 'Enter') { e.preventDefault(); saveEdit(true); }
+          else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const dir = e.key === 'ArrowDown' ? 1 : -1;
+            saveEdit(false);
+            setTimeout(() => {
+              const idx = allModels.indexOf(modelKey);
+              const nextKey = allModels[idx + dir];
+              if (nextKey) {
+                const nextRow = overrides.find((o) => o.modelKey === nextKey);
+                const nextValue = field === 'input' ? nextRow?.inputUsdPer1M : field === 'output' ? nextRow?.outputUsdPer1M : field === 'cacheRead' ? nextRow?.cacheReadUsdPer1M : nextRow?.cacheWriteUsdPer1M;
+                startEdit(nextKey, field, nextValue);
+              }
+            }, 50);
+          }
+        }}
         />
       );
     }
