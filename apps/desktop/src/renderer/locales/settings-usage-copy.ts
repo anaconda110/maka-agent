@@ -18,6 +18,7 @@ export type UsageSettingsCopy = {
     pricingCancelButton: string;
     pricingCacheReadLabel: string; pricingCacheReadPlaceholder: string;
     pricingCacheWriteLabel: string; pricingCacheWritePlaceholder: string;
+    pricingClickToSet: string;
     providerEmptyTitle: string; providerEmptyBody: string; modelEmptyTitle: string; modelEmptyBody: string;
     toolEmptyTitle: string; toolEmptyBody: string; pricingEmptyBody: string;
   };
@@ -45,6 +46,7 @@ const SETTINGS_USAGE_COPY = {
       pricingCancelButton: '取消',
       pricingCacheReadLabel: '缓存读 / 1M (USD)', pricingCacheReadPlaceholder: '可选',
       pricingCacheWriteLabel: '缓存写 / 1M (USD)', pricingCacheWritePlaceholder: '可选',
+      pricingClickToSet: '点击设置',
       providerEmptyTitle: '暂无供应商用量', providerEmptyBody: '完成一次模型请求后，这里会按供应商聚合请求数、Token 与费用。',
       modelEmptyTitle: '暂无模型用量', modelEmptyBody: '完成一次模型请求后，这里会按模型聚合请求数、Token 与费用。',
       toolEmptyTitle: '暂无工具调用', toolEmptyBody: '智能体调用工具后，这里会按工具聚合调用次数、成功、错误与平均耗时。',
@@ -72,6 +74,7 @@ const SETTINGS_USAGE_COPY = {
       pricingCancelButton: 'Cancel',
       pricingCacheReadLabel: 'Cache Read / 1M (USD)', pricingCacheReadPlaceholder: 'optional',
       pricingCacheWriteLabel: 'Cache Write / 1M (USD)', pricingCacheWritePlaceholder: 'optional',
+      pricingClickToSet: 'Click to set',
       providerEmptyTitle: 'No provider usage', providerEmptyBody: 'After a model request, provider request counts, tokens, and costs appear here.',
       modelEmptyTitle: 'No model usage', modelEmptyBody: 'After a model request, request counts, tokens, and costs appear here by model.',
       toolEmptyTitle: 'No tool calls', toolEmptyBody: 'After an agent calls a tool, calls, successes, errors, and average duration appear here by tool.',
