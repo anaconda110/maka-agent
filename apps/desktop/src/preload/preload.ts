@@ -1222,14 +1222,20 @@ const makaBridge = {
     },
   },
   usage: {
-    listPricingOverrides(): Promise<PricingConfig[]> {
-      return ipcRenderer.invoke('usage:pricing:list');
+    async listPricingOverrides(): Promise<PricingConfig[]> {
+      const result = await ipcRenderer.invoke('usage:pricing:list');
+      if (result && result.ok) return result.data;
+      throw new Error(result?.error?.message ?? 'Failed to load pricing');
     },
-    putPricingOverride(config: PricingConfig): Promise<PricingConfig> {
-      return ipcRenderer.invoke('usage:pricing:put', config);
+    async putPricingOverride(config: PricingConfig): Promise<PricingConfig> {
+      const result = await ipcRenderer.invoke('usage:pricing:put', config);
+      if (result && result.ok) return result.data;
+      throw new Error(result?.error?.message ?? 'Failed to save pricing');
     },
-    resetPricingOverride(modelKey: string): Promise<void> {
-      return ipcRenderer.invoke('usage:pricing:reset', modelKey);
+    async resetPricingOverride(modelKey: string): Promise<void> {
+      const result = await ipcRenderer.invoke('usage:pricing:reset', modelKey);
+      if (result && result.ok) return;
+      throw new Error(result?.error?.message ?? 'Failed to reset pricing');
     },
     subscribePricingChanged(handler: () => void): () => void {
       const listener = () => handler();
