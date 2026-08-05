@@ -428,7 +428,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       setOverrides(Array.isArray(result) ? result : []);
       const keys = new Set<string>();
       if (Array.isArray(result)) result.forEach((o) => keys.add(o.modelKey));
-      (props.stats?.byModel ?? []).forEach((m) => keys.add(m.model));
+      
       connectionModels.forEach((m) => keys.add(m));
       if (props.onCountChange) props.onCountChange(keys.size);
     } catch (error) {
@@ -563,7 +563,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
 
   return (
     <div>
-      {(props.stats?.byModel?.length ?? 0) > 0 || overrides.length > 0 || connectionModels.size > 0 || addingNew ? (
+      {overrides.length > 0 || connectionModels.size > 0 || addingNew ? (
         <Card className="settingsUsageTable" padding={3}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
             <thead>
@@ -592,7 +592,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
               {(() => {
                 const modelKeys = new Set<string>();
                 overrides.forEach((o) => modelKeys.add(o.modelKey));
-                (props.stats?.byModel ?? []).forEach((m) => modelKeys.add(m.model));
+                
                 connectionModels.forEach((m) => modelKeys.add(m));
                 const allModels = Array.from(modelKeys).sort();
                 return allModels.map((modelKey) => {
