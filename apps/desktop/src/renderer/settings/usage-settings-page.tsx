@@ -545,10 +545,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '')}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '—', row?.outputUsdPer1M ?? '—')}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row?.inputUsdPer1M ?? ''}
+                        {row?.inputUsdPer1M ?? '—'}
                       </span>
                     )}
                   </td>
@@ -561,10 +561,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '—', row?.outputUsdPer1M ?? '—', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row?.outputUsdPer1M ?? ''}
+                        {row?.outputUsdPer1M ?? '—'}
                       </span>
                     )}
                   </td>
@@ -577,10 +577,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '—', row?.outputUsdPer1M ?? '—', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row?.cacheReadUsdPer1M ?? ''}
+                        {row?.cacheReadUsdPer1M ?? '—'}
                       </span>
                     )}
                   </td>
@@ -593,10 +593,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '', row?.outputUsdPer1M ?? '', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        onClick={() => handleEdit(modelKey, row?.inputUsdPer1M ?? '—', row?.outputUsdPer1M ?? '—', row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
-                        {row?.cacheWriteUsdPer1M ?? ''}
+                        {row?.cacheWriteUsdPer1M ?? '—'}
                       </span>
                     )}
                   </td>
