@@ -87,7 +87,7 @@ export function UsageSettingsPage(props: {
     providers: stats?.byProvider.length ?? 0,
     models: stats?.byModel.length ?? 0,
     tools: stats?.byTool.length ?? 0,
-    pricing: stats?.pricing.length ?? 0,
+    pricing: 0,
   };
 
   async function setRange(range: UsageRange) {
@@ -397,8 +397,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     try {
       const result = await window.maka.usage.listPricingOverrides();
       setOverrides(Array.isArray(result) ? result : []);
+      console.log("[pricing] loaded overrides:", result);
     } catch (error) {
       toast.error(props.copy.tables.pricingLoadFailed, String(error));
+      console.error("[pricing] load failed:", error);
     } finally {
       setLoading(false);
     }
@@ -420,6 +422,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       await loadPricing();
     } catch (error) {
       toast.error(props.copy.tables.pricingAddFailed, String(error));
+      console.error("[pricing] save failed:", error);
     } finally {
       setSaving(false);
     }
