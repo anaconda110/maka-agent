@@ -6,8 +6,12 @@ import { test } from 'node:test';
 import { openInteractiveExecutionStoresForWrite } from '@maka/storage/execution-stores';
 import { openInteractivePlanStoreForWrite } from '@maka/storage/plan-authority';
 import { resolveStorageRoot, tryAcquireInteractiveRootOwner } from '@maka/storage/root-authority';
-import { connectRuntimeHost, type RuntimeHostConnection } from '../client/index.js';
-import { RUNTIME_HOST_PROTOCOL_VERSION } from '../protocol/index.js';
+import {
+  connectRuntimeHost,
+  type RuntimeHostConnection,
+  type RuntimeHostSessionSubscription,
+} from '../client/index.js';
+import { RUNTIME_HOST_PROTOCOL_VERSION, type SubscriptionFrame } from '../protocol/index.js';
 import { createExecutionRuntimeHostComposition } from '../server/execution-composition.js';
 import { RuntimeHostKernel } from '../server/host-kernel.js';
 
@@ -63,6 +67,7 @@ test('two UDS Clients and a restarted production Host share one retry-safe Plan 
     });
     owner = undefined;
     [desktop, tui] = await Promise.all([connect(root, 'desktop'), connect(root, 'tui')]);
+    const subscription = await desktop.openSessionSubscription({ sessionId: session.id });
 
     const first = await desktop.queryPlan({ kind: 'list_start', sessionId: session.id });
     assert.equal(first.kind, 'page');
@@ -73,11 +78,20 @@ test('two UDS Clients and a restarted production Host share one retry-safe Plan 
       proposalId: submitted.event.proposal.proposalId,
       expectedRevision: submitted.event.proposal.revision,
       expectedStoreVersion: first.storeVersion,
-      operationId: 'approve-operation',
+      turnId: 'approve-turn',
     };
-    const approved = await desktop.controlPlan(approval);
+    const started = await tui.startPlanTurn(approval);
+    const approved = started.plan;
     assert.equal(approved.eventType, 'plan_approved');
     assert.ok(approved.executionId);
+    assert.equal(started.turn.turnId, approval.turnId);
+    const changed = await withTimeout(
+      nextFrameOfKind(subscription, 'subscription.session_domain_changed'),
+      2_000,
+      'Plan invalidation did not reach the other Client',
+    );
+    assert.equal(changed.sessionId, session.id);
+    assert.equal(changed.domain, 'plan');
 
     const shared = await tui.queryPlan({ kind: 'list_start', sessionId: session.id });
     assert.equal(shared.kind, 'page');
@@ -86,6 +100,7 @@ test('two UDS Clients and a restarted production Host share one retry-safe Plan 
       assert.equal(shared.items.filter((item) => item.kind === 'execution').length, 1);
     }
 
+    await subscription.close();
     await Promise.all([desktop.close(), tui.close()]);
     desktop = undefined;
     tui = undefined;
@@ -103,9 +118,10 @@ test('two UDS Clients and a restarted production Host share one retry-safe Plan 
     owner = undefined;
     tui = await connect(root, 'tui');
 
-    const replayed = await tui.controlPlan(approval);
-    assert.equal(replayed.executionId, approved.executionId);
-    assert.equal(replayed.storeVersion, approved.storeVersion);
+    const replayed = await tui.startPlanTurn(approval);
+    assert.equal(replayed.plan.executionId, approved.executionId);
+    assert.equal(replayed.plan.storeVersion, approved.storeVersion);
+    assert.equal(replayed.turn.turnId, approval.turnId);
     const recovered = await tui.queryPlan({ kind: 'list_start', sessionId: session.id });
     assert.equal(recovered.kind, 'page');
     if (recovered.kind !== 'page') return;
@@ -115,14 +131,41 @@ test('two UDS Clients and a restarted production Host share one retry-safe Plan 
     if (!execution || execution.kind !== 'execution') return;
     assert.equal(execution.execution.status, 'interrupted');
 
-    const cancelled = await tui.controlPlan({
-      kind: 'cancel_execution',
+    await assert.rejects(
+      tui.startPlanTurn({
+        kind: 'resume_execution',
+        sessionId: session.id,
+        executionId: execution.execution.executionId,
+        turnId: approval.turnId,
+      }),
+      (error: unknown) =>
+        error instanceof Error && 'code' in error && error.code === 'operation_conflict',
+    );
+    const unchanged = await tui.queryPlan({ kind: 'list_start', sessionId: session.id });
+    assert.equal(unchanged.kind, 'page');
+    assert.equal(
+      unchanged.kind === 'page'
+        ? unchanged.items.find((item) => item.kind === 'execution')?.execution.status
+        : undefined,
+      'interrupted',
+    );
+
+    const resumed = await tui.startPlanTurn({
+      kind: 'resume_execution',
       sessionId: session.id,
       executionId: execution.execution.executionId,
-      operationId: 'cancel-operation',
+      turnId: 'resume-turn',
     });
-    assert.equal(cancelled.eventType, 'plan_execution_cancelled');
-    assert.equal(cancelled.storeVersion, approved.storeVersion + 2);
+    assert.equal(resumed.plan.eventType, 'plan_execution_resumed');
+    assert.equal(resumed.plan.executionId, execution.execution.executionId);
+    assert.equal(resumed.turn.turnId, 'resume-turn');
+    await waitForTerminal(tui, resumed.turn);
+    const afterResume = await tui.queryPlan({ kind: 'list_start', sessionId: session.id });
+    assert.equal(afterResume.kind, 'page');
+    assert.equal(
+      afterResume.kind === 'page' ? afterResume.activeExecutionId : undefined,
+      execution.execution.executionId,
+    );
   } finally {
     await Promise.allSettled([desktop?.close(), tui?.close()]);
     await host?.close().catch(() => undefined);
@@ -139,4 +182,54 @@ async function connect(
   assert.equal(result.kind, 'connected');
   if (result.kind !== 'connected') throw new Error('Unable to connect to Runtime Host');
   return result.connection;
+}
+
+async function waitForTerminal(
+  connection: RuntimeHostConnection,
+  initial: Awaited<ReturnType<RuntimeHostConnection['startPlanTurn']>>['turn'],
+): Promise<void> {
+  let snapshot = initial;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (
+      snapshot.status === 'completed' ||
+      snapshot.status === 'failed' ||
+      snapshot.status === 'cancelled'
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    snapshot = await connection.queryTurn({
+      sessionId: snapshot.sessionId,
+      turnId: snapshot.turnId,
+    });
+  }
+  throw new Error('Plan execution Turn did not settle');
+}
+
+async function nextFrameOfKind<K extends SubscriptionFrame['kind']>(
+  subscription: RuntimeHostSessionSubscription,
+  kind: K,
+): Promise<Extract<SubscriptionFrame, { kind: K }>> {
+  for await (const frame of subscription) {
+    if (frame.kind === kind) {
+      return frame as Extract<SubscriptionFrame, { kind: K }>;
+    }
+  }
+  throw new Error(`Session subscription ended before ${kind}`);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
 }

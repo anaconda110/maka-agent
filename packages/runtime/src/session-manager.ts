@@ -783,6 +783,7 @@ interface SessionManagerBaseDeps {
   newId: () => string;
   now: () => number;
   childTools?: readonly MakaTool[];
+  resolveChildTools?: (sessionId: string) => Promise<readonly MakaTool[]>;
   /** Host-owned user catalog. Runtime receives ids from models, never raw model targets. */
   subagentCatalog?: {
     list(): Promise<SubagentPresetListItem[]>;
@@ -1228,24 +1229,9 @@ export class SessionManager {
 
     const ownUpdates = await shellRuns.listSessionUpdates(sessionId);
     const ownToolCalls = new Set(ownUpdates.map((update) => update.sourceToolCallId));
-    let messages: StoredMessage[];
-    try {
-      messages = await this.getMessages(sessionId);
-    } catch (error) {
-      if (!(error instanceof RuntimeReadModelError)) throw error;
-      // ShellRun hydration is a best-effort UI projection. A legacy RuntimeEvent
-      // incompatibility must not turn its retry loop into a permanent IPC error.
-      try {
-        messages = await this.deps.store.readMessages(sessionId);
-      } catch {
-        return ownUpdates;
-      }
-    }
-    const bashToolCalls = new Set(
-      messages.flatMap((message) =>
-        message.type === 'tool_call' && message.toolName === 'Bash' ? [message.id] : [],
-      ),
-    );
+    const messages = await this.readShellRunProjectionMessages(sessionId);
+    if (!messages) return ownUpdates;
+    const bashToolCalls = shellRunBashToolCallIds(messages);
     const inherited = new Map<
       string,
       {
@@ -1296,6 +1282,55 @@ export class SessionManager {
       }),
     );
     return [...ownUpdates, ...inheritedUpdates];
+  }
+
+  async getShellRunUpdate(sessionId: string, ref: string): Promise<ShellRunUpdate | null> {
+    const shellRuns = this.deps.shellRuns;
+    if (!shellRuns) return null;
+    const own = await shellRuns.getSessionUpdate(sessionId, ref);
+    if (own) return own;
+
+    const messages = await this.readShellRunProjectionMessages(sessionId);
+    if (!messages) return null;
+    const bashToolCalls = shellRunBashToolCallIds(messages);
+    let candidate:
+      | {
+          turnId: string;
+          toolUseId: string;
+          result: ShellRunUpdate['result'];
+        }
+      | undefined;
+    for (const message of messages) {
+      if (
+        message.type === 'tool_result' &&
+        bashToolCalls.has(message.toolUseId) &&
+        message.content.kind === 'shell_run' &&
+        message.content.ref === ref &&
+        isActiveShellRunStatus(message.content.status)
+      ) {
+        const { operation: _operation, ...result } = message.content;
+        candidate = { turnId: message.turnId, toolUseId: message.toolUseId, result };
+      }
+    }
+    if (!candidate) return null;
+
+    const inheritedFrom = await this.deps.store.readHeader(sessionId);
+    const parentSessionId = inheritedFrom.revisionParentSessionId ?? inheritedFrom.parentSessionId;
+    if (!parentSessionId) return null;
+    const owner = await this.resolveShellRunOwner(parentSessionId, ref);
+    return {
+      sessionId,
+      ownership: owner
+        ? {
+            kind: 'source_owned',
+            sourceSessionId: parentSessionId,
+            ownerSessionId: owner.sessionId,
+          }
+        : { kind: 'source_unavailable', sourceSessionId: parentSessionId },
+      sourceTurnId: candidate.turnId,
+      sourceToolCallId: candidate.toolUseId,
+      result: owner?.result ?? candidate.result,
+    };
   }
 
   async recoverInterruptedSessions(): Promise<string[]> {
@@ -2401,7 +2436,7 @@ export class SessionManager {
     const definition = requireBuiltinAgentDefinition(input.agentId);
     assertAgentDefinitionRunnable({
       definition,
-      tools: this.deps.childTools ?? [],
+      tools: await this.childToolsForSession(input.source.sessionId),
       worktreeChildExecutorAvailable: this.hasWorktreeChildExecutor(),
     });
     const childPermissionMode =
@@ -2968,7 +3003,7 @@ export class SessionManager {
     this.assertActiveParentRun(parentSessionId, parentRun, input.spawnedBy.parentTurnId);
 
     const definition = requireBuiltinAgentDefinitionByProfile(input.agentProfile);
-    const availableChildTools = this.deps.childTools ?? [];
+    const availableChildTools = await this.childToolsForSession(parentSessionId);
     assertAgentDefinitionRunnable({
       definition,
       tools: availableChildTools,
@@ -3307,7 +3342,7 @@ export class SessionManager {
     await this.ensureChildWorkspace(sessionHeader);
     assertAgentDefinitionRunnable({
       definition,
-      tools: this.deps.childTools ?? [],
+      tools: await this.childToolsForSession(sessionId),
       worktreeChildExecutorAvailable: this.hasWorktreeChildExecutor(),
     });
     const visited = new Set<string>();
@@ -3433,7 +3468,7 @@ export class SessionManager {
     }
     await this.ensureChildWorkspace(child);
     await this.assertLinkedChildBoundaryMatchesParent(parentSessionId, child.id);
-    const runnableTools = buildToolsForAgentDefinition(this.deps.childTools ?? [], {
+    const runnableTools = buildToolsForAgentDefinition(await this.childToolsForSession(child.id), {
       id: snapshot.agentId,
       permissionMode: child.permissionMode,
       tools: snapshot.toolNames,
@@ -3938,9 +3973,10 @@ export class SessionManager {
       const resolved = requireBuiltinAgentDefinition(sourceRun.agentId);
       definition = {
         ...resolved,
-        toolNames: buildToolsForAgentDefinition(this.deps.childTools ?? [], resolved).map(
-          (tool) => tool.name,
-        ),
+        toolNames: buildToolsForAgentDefinition(
+          await this.childToolsForSession(sessionId),
+          resolved,
+        ).map((tool) => tool.name),
       };
     }
     const authority = runtimeContinuationAuthority(this.deps.runtimeEventStore);
@@ -4283,7 +4319,7 @@ export class SessionManager {
 
   async listChildAgents(sessionId: string): Promise<AgentListResult> {
     const definitions = listBuiltinAgentDefinitions({
-      tools: this.deps.childTools ?? [],
+      tools: await this.childToolsForSession(sessionId),
       worktreeChildExecutorAvailable: this.hasWorktreeChildExecutor(),
     });
     const presets = this.deps.subagentCatalog ? await this.deps.subagentCatalog.list() : [];
@@ -4389,6 +4425,12 @@ export class SessionManager {
       ],
       runs: legacyRuns,
     };
+  }
+
+  private async childToolsForSession(sessionId: string): Promise<readonly MakaTool[]> {
+    return this.deps.resolveChildTools
+      ? await this.deps.resolveChildTools(sessionId)
+      : (this.deps.childTools ?? []);
   }
 
   async readChildAgentOutput(
@@ -5088,6 +5130,21 @@ export class SessionManager {
       }
     }
     return undefined;
+  }
+
+  private async readShellRunProjectionMessages(sessionId: string): Promise<StoredMessage[] | null> {
+    try {
+      return await this.getMessages(sessionId);
+    } catch (error) {
+      if (!(error instanceof RuntimeReadModelError)) throw error;
+      // ShellRun hydration is a best-effort UI projection. A legacy RuntimeEvent
+      // incompatibility must not turn its retry loop into a permanent IPC error.
+      try {
+        return await this.deps.store.readMessages(sessionId);
+      } catch {
+        return null;
+      }
+    }
   }
 
   private async findChildRunForOutput(
@@ -6667,6 +6724,14 @@ function boundAgentOutputCollections(
 function tail<T>(items: readonly T[], max: number): T[] {
   if (items.length <= max) return [...items];
   return items.slice(items.length - max);
+}
+
+function shellRunBashToolCallIds(messages: readonly StoredMessage[]): Set<string> {
+  return new Set(
+    messages.flatMap((message) =>
+      message.type === 'tool_call' && message.toolName === 'Bash' ? [message.id] : [],
+    ),
+  );
 }
 
 function throwIfChildExecutionAborted(signal: AbortSignal | undefined, message: string): void {

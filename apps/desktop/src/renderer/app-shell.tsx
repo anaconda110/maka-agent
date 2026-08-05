@@ -17,7 +17,6 @@ import type {
   UiLocalePreference,
 } from '@maka/core';
 import {
-  buildDeepResearchImplementationPrompt,
   collapseSessionRevisions,
   filterLinkedSessionTree,
   hasSettledInitialOnboarding,
@@ -527,6 +526,10 @@ function AppShellContent({
   const [paletteOpen, openPalette, closePalette] = useCommandPalette();
   const [viewMode, setViewMode] = useState<SessionViewMode>('conversation');
   const composerRef = useRef<ComposerHandle>(null);
+  // The rail's toggle has to reach Astryx's resizable state, not just this
+  // boolean — see the prop's note on SessionListPanel. The sidenav is mounted
+  // for the whole shell, so the handle is always live by the time it is called.
+  const sessionSideNavHandleRef = useRef<SideNavImperativeCollapseHandle | null>(null);
   // Codex-style quote side panel: a companion (fork of the main session) opened
   // from text selections in the transcript, surfaced as a transient workbar tab.
   // `quotes` accumulates excerpts staged for the next follow-up — selecting more
@@ -1217,7 +1220,6 @@ function AppShellContent({
     workbarTab,
     setWorkbarTab,
   } = useShellLayout();
-  const sessionSideNavHandleRef = useRef<SideNavImperativeCollapseHandle>(null);
 
   // The companion panel unmounts (and its fork is removed) when the workbar
   // collapses or the active session moves off the panel's source; clear the
@@ -2081,7 +2083,7 @@ function AppShellContent({
       >
         <AppShellTopbarActions
           sidebarCollapsed={sessionListCollapsed}
-          sidebarHandleRef={sessionSideNavHandleRef}
+          onToggleSidebar={() => sessionSideNavHandleRef.current?.getCollapseState()?.toggle()}
           sidebarToggleHidden={settingsOpen}
           onOpenSearchModal={() => setSearchModalOpen(true)}
         />
@@ -2468,7 +2470,16 @@ function AppShellContent({
                   iterations: activeGoal.iterations,
                   maxIterations: activeGoal.maxIterations,
                             onClear: () => {
-                              void window.maka.goal.clear(activeGoal.sessionId);
+                              void window.maka.goal.clear(activeGoal.sessionId).catch((error) => {
+                                toastApi.error(
+                                  shellCopy.goalClearFailedTitle,
+                                  localizedShellErrorMessage(
+                                    error,
+                                    shellCopy.goalClearFailedFallback,
+                                    uiLocale,
+                                  ),
+                                );
+                              });
                             },
                           }
                         : undefined
@@ -2529,7 +2540,8 @@ function AppShellContent({
                     : undefined
                 }
                 onContinueDeepResearchHandoff={(run) => {
-                  const prompt = buildDeepResearchImplementationPrompt(run);
+                  const prompt = run.implementationPrompt;
+                  if (!prompt) return;
                   void createSession().then(() => {
                     window.requestAnimationFrame(() => {
                       composerRef.current?.setText(prompt);
@@ -2566,9 +2578,14 @@ function AppShellContent({
                 ) : null}
               </ChatSurfaceLayout>
             </div>
-            {navSelection.section === 'sessions' && activeId && !workbarCollapsed && (
+            {/* Rendered collapsed too: ChatWorkbar's own box is what the
+                collapse animates, and it has to be in the tree on both sides of
+                the toggle for there to be an animation at all. The column
+                inside it still unmounts. */}
+            {navSelection.section === 'sessions' && activeId && (
               <ChatWorkbar
                 activeId={activeId}
+                collapsed={workbarCollapsed}
                 browserLive={liveBrowserSessionIds.includes(activeId)}
                 hidden={hasModalOpen}
                 width={workbarWidth}

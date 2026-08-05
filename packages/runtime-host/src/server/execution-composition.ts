@@ -16,9 +16,11 @@ import {
   isBuiltinFilesystemWorkerSandboxAvailable,
   prepareSkillInvocationMessageFromInventory,
   RuntimeReadModel,
+  routeWebSearchTools,
   SessionManager,
   SessionActivityRegistry,
   ShellRunProcessManager,
+  type MakaTool,
   type RuntimeHostedRootAuthority,
 } from '@maka/runtime';
 import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
@@ -46,6 +48,12 @@ import { openInteractiveTaskLedgerStoreForWrite } from '@maka/storage/task-ledge
 import { openInteractiveShellRunStoreForWrite } from '@maka/storage/shell-run-authority';
 import { openInteractiveUsageStoresForWrite } from '@maka/storage/usage-stores';
 import { resolveWorkspaceIdentity } from '@maka/storage/workspace-identity';
+import {
+  openManagedWorkspaceOwner,
+  type ManagedWorkspaceFilesystemWorker,
+  type ManagedWorkspaceOwner,
+  type VerifiedGitRuntimeInput,
+} from '@maka/storage/managed-workspace-owner';
 import { CanonicalSessionProjectionReader } from './canonical-session-projection.js';
 import {
   bindHostChildAgentBackend,
@@ -98,10 +106,24 @@ import { HostTaskLedgerCoordinator } from './task-ledger-coordinator.js';
 import { HostUsagePricingCoordinator } from './usage-pricing-coordinator.js';
 import { createHostWebSearchTool } from './web-search-tool.js';
 import { createHostExecutionArtifactServices } from './execution-artifacts.js';
+import {
+  createRuntimeHostWorkspaceExecutionComposition,
+  RuntimeHostWorkspaceExecutionError,
+  type RuntimeHostWorkspaceExecutionComposition,
+} from './workspace-execution-composition.js';
+
+export interface ExecutionRuntimeHostComposition extends RuntimeHostComposition {
+  readonly workspaceExecution: RuntimeHostWorkspaceExecutionComposition;
+}
+
+export interface CreateExecutionRuntimeHostCompositionOptions {
+  readonly managedWorkspaceGitRuntime?: VerifiedGitRuntimeInput;
+}
 
 export async function createExecutionRuntimeHostComposition(
   context: RuntimeHostCompositionContext,
-): Promise<RuntimeHostComposition> {
+  options: CreateExecutionRuntimeHostCompositionOptions = {},
+): Promise<ExecutionRuntimeHostComposition> {
   const stores = await openInteractiveExecutionStoresForWrite(context.owner.lease);
   let graphControlStore: ReturnType<typeof createAgentGraphControlStore> | undefined;
   let taskLedgerStore:
@@ -123,6 +145,9 @@ export async function createExecutionRuntimeHostComposition(
     | undefined;
   let graphClient: HostAgentGraphCoordinator | undefined;
   let sessionEffects: HostSessionEffectCoordinator | undefined;
+  let unsubscribeTaskLedger: (() => void) | undefined;
+  let managedWorkspaceOwner: ManagedWorkspaceOwner | undefined;
+  let workspaceExecution: RuntimeHostWorkspaceExecutionComposition | undefined;
   try {
     const runtimePolicyStores = await openInteractiveRuntimePolicyStoresForWrite(
       context.owner.lease,
@@ -186,6 +211,26 @@ export async function createExecutionRuntimeHostComposition(
             getLaunchSpec: filesystemWorkerLaunchSpecProvider,
           })
         : undefined;
+    const managedFilesystemWorker = filesystemWorker
+      ? adaptManagedWorkspaceFilesystemWorker(filesystemWorker)
+      : undefined;
+    if (options.managedWorkspaceGitRuntime) {
+      if (!managedFilesystemWorker) {
+        throw new RuntimeHostWorkspaceExecutionError(
+          'filesystem_worker_unavailable',
+          'Managed workspace execution requires the sandboxed filesystem worker',
+        );
+      }
+      managedWorkspaceOwner = await openManagedWorkspaceOwner({
+        rootOwner: context.owner,
+        gitRuntime: options.managedWorkspaceGitRuntime,
+        filesystemWorker: managedFilesystemWorker,
+      });
+    }
+    workspaceExecution = createRuntimeHostWorkspaceExecutionComposition({
+      ...(managedFilesystemWorker ? { filesystemWorker: managedFilesystemWorker } : {}),
+      ...(managedWorkspaceOwner ? { managedOwner: managedWorkspaceOwner } : {}),
+    });
     const taskLedger = new HostTaskLedgerCoordinator(
       taskLedgerStore,
       sessionAdmission,
@@ -196,11 +241,15 @@ export async function createExecutionRuntimeHostComposition(
       sessions: {
         listShellRunUpdates: (sessionId) =>
           requireSessionManager(manager).listShellRunUpdates(sessionId),
+        getShellRunUpdate: (sessionId, ref) =>
+          requireSessionManager(manager).getShellRunUpdate(sessionId, ref),
       },
       sessionHeaders: stores.sessionStore,
       sessionAdmission,
       acquireResidency: context.acquireResidency,
       requestDrain: context.requestDrain,
+      onProjectionChanged: (update) =>
+        requireContinuity(continuity).enqueueRuntimeResourceChanged(update),
     });
     const executionArtifacts = createHostExecutionArtifactServices({
       artifacts: openedArtifactStore,
@@ -216,7 +265,11 @@ export async function createExecutionRuntimeHostComposition(
       ...(sandboxManager ? { sandboxManager } : {}),
       ...(filesystemWorker ? { filesystemWorker } : {}),
     };
-    const hostTools = [createHostWebSearchTool({ policy: runtimePolicyStores.operations })];
+    const hostTools = [
+      createHostWebSearchTool({
+        policy: runtimePolicyStores.operations,
+      }),
+    ];
     const childAgentTools = createHostChildAgentToolComposition({
       taskLedger,
       builtinTools,
@@ -292,12 +345,16 @@ export async function createExecutionRuntimeHostComposition(
       createSessionTranscriptReader({ stores, canonicalPermissionOutcomes }),
     );
     const continuityCoordinator = continuity;
+    unsubscribeTaskLedger = taskLedger.subscribe(({ sessionId }) =>
+      continuityCoordinator.enqueueSessionDomainChanged(sessionId, 'task'),
+    );
     deepResearch = new HostDeepResearchCoordinator({
       store: openedDeepResearchStore,
       artifacts: openedArtifactStore,
       sessions: stores.sessionStore,
       sessionAdmission,
-      onProjectionChanged: (sessionId) => continuityCoordinator.enqueueCanonicalRefresh(sessionId),
+      onProjectionChanged: (sessionId) =>
+        continuityCoordinator.enqueueSessionDomainChanged(sessionId, 'deep_research'),
     });
     dailyReview = new HostDailyReviewCoordinator({
       store: openedDailyReviewStore,
@@ -324,6 +381,7 @@ export async function createExecutionRuntimeHostComposition(
     const beginDrain = () => {
       if (draining) return;
       draining = true;
+      workspaceExecution?.beginDrain();
       goal?.beginDrain();
       rootCoordinator?.beginDrain();
       runtimeResources?.beginDrain();
@@ -391,6 +449,8 @@ export async function createExecutionRuntimeHostComposition(
         resolveRootTools: (sessionId) =>
           requireGraphCoordinator(graphCoordinator).toolsForSession(sessionId),
         parentAgentTools: childAgentTools.parentTools,
+        childTools: childAgentTools.childTools,
+        worktreePatchWriteBackAvailable: true,
         childAgents: bindHostChildAgentBackend(
           requireSessionManager(manager),
           backendContext.sessionId,
@@ -467,6 +527,28 @@ export async function createExecutionRuntimeHostComposition(
       requestDrain: context.requestDrain,
     });
     sessionEffects = sessionEffectCoordinator;
+    const resolveChildTools = async (sessionId: string): Promise<readonly MakaTool[]> => {
+      const header = await stores.sessionStore.readHeader(sessionId);
+      const [resolved, snapshot] = await Promise.all([
+        runtimePolicyStores.operations.resolveExecutionConnection(header.llmConnectionSlug),
+        runtimePolicyStores.runtimePolicy.getSnapshot(),
+      ]);
+      if (resolved.kind !== 'ready') {
+        return childAgentTools.childTools.filter((tool) => tool.name !== 'WebSearch');
+      }
+      const { models, ...connection } = resolved.connection;
+      return routeWebSearchTools({
+        tools: childAgentTools.childTools,
+        settings: snapshot.policy.webSearch,
+        connection: {
+          ...connection,
+          defaultModel: header.model,
+          ...(models ? { models: [...models] } : {}),
+        },
+        model: header.model,
+        privacy: snapshot.policy.privacy,
+      });
+    };
     manager = new SessionManager({
       store: stores.sessionStore,
       runStore: stores.agentRunStore,
@@ -522,6 +604,7 @@ export async function createExecutionRuntimeHostComposition(
       shellRuns,
       planStore: openedPlanStore,
       childTools: childAgentTools.childTools,
+      resolveChildTools,
       worktreeChildExecutor,
       listArtifactsForTurn: (sessionId, turnId) =>
         openedArtifactStore.listTurnArtifacts(sessionId, turnId),
@@ -743,7 +826,10 @@ export async function createExecutionRuntimeHostComposition(
       isSessionActive: (sessionId) => coordinator.readRootState(sessionId).kind !== 'idle',
       refreshContinuity: (sessionId, lease) =>
         continuityCoordinator.refreshCanonical(sessionId, lease),
+      onProjectionChanged: (sessionId) =>
+        continuityCoordinator.enqueueSessionDomainChanged(sessionId, 'plan'),
       requestDrain: context.requestDrain,
+      root: coordinator,
     });
     const executionInspect = new HostExecutionInspectCoordinator(stores);
     const sessionRevisions = new HostSessionRevisionCoordinator({
@@ -910,6 +996,14 @@ export async function createExecutionRuntimeHostComposition(
         } catch (error) {
           errors.push(error);
         }
+        // Host operations have already drained before composition.close().
+        // Close the workspace execution owner before the kernel releases the
+        // root owner, preserving tool operations -> managed owner -> root owner.
+        try {
+          await workspaceExecution?.close();
+        } catch (error) {
+          errors.push(error);
+        }
         try {
           await sessionEffects?.close();
         } catch (error) {
@@ -988,6 +1082,7 @@ export async function createExecutionRuntimeHostComposition(
           errors.push(error);
         }
         try {
+          unsubscribeTaskLedger?.();
           taskLedgerStore?.close();
         } catch (error) {
           errors.push(error);
@@ -1026,6 +1121,7 @@ export async function createExecutionRuntimeHostComposition(
     };
     return {
       handlers,
+      workspaceExecution: requireWorkspaceExecution(workspaceExecution),
       continuity: continuityCoordinator,
       clientCapabilities,
       releaseConnection: (connectionId: string) => {
@@ -1040,6 +1136,12 @@ export async function createExecutionRuntimeHostComposition(
     };
   } catch (error) {
     const errors: unknown[] = [error];
+    try {
+      await workspaceExecution?.close();
+      if (!workspaceExecution) await managedWorkspaceOwner?.close();
+    } catch (closeError) {
+      errors.push(closeError);
+    }
     try {
       await sessionEffects?.close();
     } catch (closeError) {
@@ -1076,6 +1178,7 @@ export async function createExecutionRuntimeHostComposition(
       errors.push(closeError);
     }
     try {
+      unsubscribeTaskLedger?.();
       taskLedgerStore?.close();
     } catch (closeError) {
       errors.push(closeError);
@@ -1113,6 +1216,35 @@ export async function createExecutionRuntimeHostComposition(
 function requireRootCoordinator(coordinator: RootTurnCoordinator | undefined): RootTurnCoordinator {
   if (!coordinator) throw new Error('Runtime Host root coordinator is not composed');
   return coordinator;
+}
+
+function requireWorkspaceExecution(
+  composition: RuntimeHostWorkspaceExecutionComposition | undefined,
+): RuntimeHostWorkspaceExecutionComposition {
+  if (!composition) throw new Error('Runtime Host workspace execution is not composed');
+  return composition;
+}
+
+function adaptManagedWorkspaceFilesystemWorker(
+  worker: Pick<FilesystemWorkerClient, 'execute'>,
+): ManagedWorkspaceFilesystemWorker {
+  return {
+    async execute(input) {
+      const result = await worker.execute(input);
+      switch (result.kind) {
+        case 'read':
+        case 'read_image':
+        case 'glob':
+        case 'grep':
+          return result;
+        default:
+          throw new RuntimeHostWorkspaceExecutionError(
+            'workspace_operation_denied',
+            `Read-only filesystem worker returned mutating result ${result.kind}`,
+          );
+      }
+    },
+  };
 }
 
 function subagentWritebackArtifactId(sessionId: string, turnId: string): string {

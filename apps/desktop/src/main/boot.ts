@@ -47,6 +47,8 @@ import {
   BotRegistry,
   ShellRunProcessManager,
   SessionActivityRegistry,
+  buildParentAgentTools,
+  listRunnableBuiltinAgentDefinitions,
   listInvocableSkills,
   prepareSkillInvocationMessage,
   resolveSkillDiscoveryPaths,
@@ -57,6 +59,7 @@ import type {
   GoalTurnOutcome,
   HostCapabilities,
   HostCapabilitiesResolver,
+  MakaTool,
 } from '@maka/runtime';
 import type { LlmConnection } from '@maka/core/llm-connections';
 import {
@@ -89,6 +92,7 @@ import { assertDesktopExecutionBoundary } from './desktop-execution-admission.js
 import { createFileCredentialStore } from './credential-store.js';
 import { bindOnboardingDeps, createOnboardingService } from './onboarding-service.js';
 import { createDailyReviewArchiveStore } from './daily-review-archive-store.js';
+import { projectEmbeddedDeepResearch } from './deep-research-desktop-projection.js';
 import { resolveE2eFixture, seedE2eFixture } from './e2e-fixture.js';
 import { resolveBuildInfo } from './build-info.js';
 import { resolveShellEnv } from './shell-env.js';
@@ -100,6 +104,7 @@ import { createMainWindowController } from './main-window.js';
 import { createDailyReviewMainService } from './daily-review-main.js';
 import { createPlanReminderMainService } from './plan-reminders-main.js';
 import { createBotIncomingMainService } from './bot-incoming-main.js';
+import { createEmbeddedBotSessionAdapter } from './embedded-bot-session-adapter.js';
 import { createSubscriptionModelFetch } from './subscription-model-fetch.js';
 import { createSystemPromptMainService } from './system-prompt-main.js';
 import { createMainTaskLedgerWiring } from './task-ledger-wiring.js';
@@ -139,6 +144,7 @@ import { createSettingsRuntimeEffects } from './settings-runtime-effects.js';
 import { createAiSdkBackendFactory, createSessionStreamer } from './session-stream.js';
 import {
   resolveDesktopBackendToolSurface,
+  resolveDesktopChildToolSurface,
   resolveDesktopNewSessionSkillHost,
   resolveDesktopSessionSkillHost,
 } from './desktop-backend-tool-surface.js';
@@ -748,9 +754,28 @@ const desktopBackendToolSurfaceDeps = {
   builtinTools,
   toolEconomy: desktopProductToolSurface.identity.policy.economy,
   planStore,
+  getWebSearchSettings: async () => (await settingsStore.get()).webSearch,
+  getPrivacySettings: async () => (await settingsStore.get()).privacy,
+  childTools: childAgentTools,
+  buildParentAgentToolsForChildSurface: (tools: readonly MakaTool[]) =>
+    buildParentAgentTools({
+      taskLedger: taskLedgerStore,
+      definitions: listRunnableBuiltinAgentDefinitions({
+        tools,
+        worktreeChildExecutorAvailable: worktreeChildExecutor !== undefined,
+      }),
+    }),
   getAgentGraphSupervisorTools: (sessionId: string) =>
     agentGraphCoordinator.toolsForSession(sessionId),
 };
+
+async function resolveDesktopChildTools(sessionId: string) {
+  const header = await store.readHeader(sessionId);
+  return resolveDesktopChildToolSurface(desktopBackendToolSurfaceDeps, {
+    header,
+    tools: childAgentTools,
+  });
+}
 // Cursor-overlay teardown assigns a module-scoped `let`, so it stays in boot.ts.
 onMainWindowClose = () => {
   computerUseOverlay.destroyAll();
@@ -914,6 +939,7 @@ const runtime = new SessionManager({
   shellRuns,
   backends,
   childTools: childAgentTools,
+  resolveChildTools: resolveDesktopChildTools,
   subagentCatalog,
   worktreeChildExecutor,
   safeBoundaryResumeEnabled: process.env.MAKA_RUNTIME_SAFE_BOUNDARY_RESUME === '1',
@@ -1045,24 +1071,27 @@ const dailyReview = createDailyReviewMainService({
   buildSubscriptionModelFetch,
 });
 botIncoming = createBotIncomingMainService({
-  runtime,
-  createSession: createDesktopSession,
   botRegistry,
-  getDefaultConnectionSlug: () => connectionStore.getDefault(),
-  getReadyConnection,
-  readSessionHeader: async (sessionId) => {
-    try {
-      return await store.readHeader(sessionId);
-    } catch (error) {
-      throw sessionLifecycleErrorFromReadFailure(error) ?? error;
-    }
-  },
-  ensureSessionCanSend,
-  emitSessionsChanged,
-  runAgentTurn: ({ sessionId, iterator, turnId, onEvent }) => streamEvents(sessionId, iterator, {
-    turnId,
-    goalBoundary: 'external',
-    observeEvent: onEvent,
+  sessions: createEmbeddedBotSessionAdapter({
+    runtime,
+    createSession: createDesktopSession,
+    getDefaultConnectionSlug: () => connectionStore.getDefault(),
+    getReadyConnection,
+    readSessionHeader: async (sessionId) => {
+      try {
+        return await store.readHeader(sessionId);
+      } catch (error) {
+        throw sessionLifecycleErrorFromReadFailure(error) ?? error;
+      }
+    },
+    ensureSessionCanSend,
+    emitSessionsChanged,
+    runAgentTurn: ({ sessionId, iterator, turnId, onEvent }) =>
+      streamEvents(sessionId, iterator, {
+        turnId,
+        goalBoundary: 'external',
+        observeEvent: onEvent,
+      }),
   }),
 });
 
@@ -1085,8 +1114,8 @@ const onboardingService = createOnboardingService(
 
 function registerIpc(): void {
   const currentProjectRoot = resolveCurrentProjectRoot;
-  ipcMain.handle('deepResearch:get', (_event, sessionId: string) =>
-    deepResearchStore.read(sessionId));
+  ipcMain.handle('deepResearch:get', async (_event, sessionId: string) =>
+    projectEmbeddedDeepResearch(await deepResearchStore.read(sessionId)));
   registerMcpIpcMain({
     ipcMain,
     store: mcpConfigStore,

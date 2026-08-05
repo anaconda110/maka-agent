@@ -90,7 +90,7 @@ import type {
   Task,
   TaskLedgerChangedEvent,
   DeepResearchChangedEvent,
-  DeepResearchRun,
+  DeepResearchClientProgress,
 } from '@maka/core';
 import type { SessionTrace } from '@maka/core/session-trace';
 import type {
@@ -136,7 +136,7 @@ const makaBridge = {
     },
   },
   deepResearch: {
-    get(sessionId: string): Promise<DeepResearchRun | undefined> {
+    get(sessionId: string): Promise<DeepResearchClientProgress | undefined> {
       return ipcRenderer.invoke('deepResearch:get', sessionId);
     },
     subscribeChanges(handler: (event: DeepResearchChangedEvent) => void): () => void {
@@ -321,6 +321,14 @@ const makaBridge = {
     getPlanState(sessionId: string): Promise<PlanSessionState> {
       return ipcRenderer.invoke('plan-mode:getState', sessionId);
     },
+    subscribePlanChanges(sessionId: string, handler: () => void): () => void {
+      const channel = 'plan-mode:changed';
+      const listener = (_event: Electron.IpcRendererEvent, payload: { sessionId: string }) => {
+        if (payload.sessionId === sessionId) handler();
+      };
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.off(channel, listener);
+    },
     requestPlanRevision(sessionId: string, proposalId: string): Promise<PlanSessionState> {
       return ipcRenderer.invoke('plan-mode:requestRevision', sessionId, proposalId);
     },
@@ -333,16 +341,16 @@ const makaBridge = {
     approvePlan(sessionId: string, input: {
       proposalId: string;
       expectedRevision: number;
-      expectedStoreVersion?: number;
-    }): Promise<{ state: PlanSessionState; turnId: string; executionId: string }> {
+      expectedStoreVersion: number;
+      turnId: string;
+    }): Promise<{ turnId: string; executionId: string }> {
       return ipcRenderer.invoke('plan-mode:approve', sessionId, input);
     },
-    resumePlan(sessionId: string, executionId: string): Promise<{
-      state: PlanSessionState;
+    resumePlan(sessionId: string, executionId: string, turnId: string): Promise<{
       turnId: string;
       executionId: string;
     }> {
-      return ipcRenderer.invoke('plan-mode:resume', sessionId, executionId);
+      return ipcRenderer.invoke('plan-mode:resume', sessionId, executionId, turnId);
     },
     abandonPlanExecution(sessionId: string, executionId: string): Promise<PlanSessionState> {
       return ipcRenderer.invoke('plan-mode:abandonExecution', sessionId, executionId);

@@ -1,7 +1,7 @@
 export default {
   appId: 'com.maka.desktop',
   productName: 'Maka',
-  artifactName: 'Maka-${version}-${os}-${arch}.${ext}',
+  artifactName: 'Maka-${version}-mac-${arch}.${ext}',
   asar: true,
   directories: {
     output: 'release',
@@ -108,25 +108,18 @@ export default {
   win: {
     target: [
       { target: 'nsis', arch: ['x64'] },
-      { target: 'portable', arch: ['x64'] },
+      { target: 'zip', arch: ['x64'] },
     ],
+    artifactName: 'Maka-${version}-win-${arch}.${ext}',
     icon: 'assets/icon.png',
+    // No Authenticode certificate yet. Being unsigned is the absence of one:
+    // electron-builder skips signing when no certificate is configured, and
+    // `forceCodeSigning` is left off so that skip is not an error. Nothing here
+    // turns update signature verification off, because nothing has to: without a
+    // certificate there is no publisher name to put in app-update.yml, and
+    // electron-updater skips the check when there is none. Adding a certificate
+    // is then the whole change — the verification follows it.
   },
-  nsis: {
-    oneClick: false,
-    perMachine: false,
-    allowToChangeInstallationDirectory: true,
-    createDesktopShortcut: true,
-    createStartMenuShortcut: true,
-    shortcutName: 'Maka',
-  },
-  portable: {
-    artifactName: 'Maka-${version}-win-x64-portable.${ext}',
-  },
-  // node-pty ships prebuilt binaries (prebuilds/win32-x64/*.node); skip
-  // npmRebuild on Windows to avoid requiring Visual Studio C++ Build Tools.
-  // macOS still benefits from native rebuild for any future native modules.
-  ...(process.platform === 'win32' ? { npmRebuild: false } : {}),
   publish: [
     {
       provider: 'github',

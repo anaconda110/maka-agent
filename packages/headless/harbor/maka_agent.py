@@ -43,6 +43,7 @@ from maka_trajectory import (
 from process_scope import (
     COMMAND_SCOPE_ENV as _COMMAND_SCOPE_ENV,
     COMMAND_SCOPE_ROOT as _COMMAND_SCOPE_ROOT,
+    exec_cleanup_command as _exec_cleanup_command,
     scoped_command as _scoped_command,
     scoped_command_cleanup_command as _scoped_command_cleanup_command,
     scoped_process_cleanup_command as _scoped_process_cleanup_command,
@@ -619,6 +620,7 @@ class MakaAgent(BaseInstalledAgent):
             "MAKA_TRIAL_PRICING_SOURCE",
             "MAKA_REASONING_EFFORT",
             "MAKA_AGENT_TOOLS",
+            "MAKA_WEB_SEARCH_ENABLED",
             "MAKA_MODEL_API_PROTOCOL",
             # Default per-command timeout floor for the in-container Bash tool, so
             # long builds/tests do not hit a hard-coded 2-minute ceiling.
@@ -1508,7 +1510,7 @@ class _ToolExecutorServer:
                 self.command_scope, command_ids, signal
             )
         )
-        await self._agent.exec_as_agent(self._environment, command=command)
+        await _exec_cleanup_command(self._agent, self._environment, command)
 
     def _handle_post(self, handler: BaseHTTPRequestHandler) -> None:
         if handler.path != "/exec":

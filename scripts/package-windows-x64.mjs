@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { npmSpawnOptions } from './npm-spawn.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const desktopRoot = join(repoRoot, 'apps', 'desktop');
@@ -12,14 +13,19 @@ const requiredElectronLicensePaths = [
   join(electronDistributionDirectory, 'LICENSES.chromium.html'),
 ];
 
-function runCommand(command, args) {
+export function runCommand(
+  command,
+  args,
+  { spawnProcess = spawn, platform = process.platform } = {},
+) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
+    // Every command here is a repository constant, so the shell that Windows
+    // needs to reach npm.cmd introduces no quoting concern.
+    const child = spawnProcess(
+      command,
+      args,
+      npmSpawnOptions({ cwd: repoRoot, env: process.env, stdio: 'inherit' }, platform),
+    );
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (code === 0) {
@@ -40,7 +46,6 @@ function runCommand(command, args) {
 export async function packageWindowsX64({
   platform = process.platform,
   arch = process.arch,
-  env = process.env,
   run = runCommand,
   remove = rm,
   assertFile = access,
@@ -50,8 +55,10 @@ export async function packageWindowsX64({
   }
 
   const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'));
-  const nsisPath = join(releaseDirectory, `Maka-${manifest.version}-win-x64.exe`);
-  const portablePath = join(releaseDirectory, `Maka-${manifest.version}-win-x64-portable.exe`);
+  const exePath = join(releaseDirectory, `Maka-${manifest.version}-win-x64.exe`);
+  const zipPath = join(releaseDirectory, `Maka-${manifest.version}-win-x64.zip`);
+  const updateMetadataPath = join(releaseDirectory, 'latest.yml');
+  const unpackedDirectory = join(releaseDirectory, 'win-unpacked');
 
   for (const path of requiredElectronLicensePaths) {
     await assertFile(path);
@@ -61,23 +68,22 @@ export async function packageWindowsX64({
   await run('npm', ['run', 'build']);
   await run('npm', ['run', 'check:release']);
   await remove(releaseDirectory, { recursive: true, force: true });
-  await run('npx', [
-    'electron-builder',
-    '--config',
-    join('apps', 'desktop', 'electron-builder.config.mjs'),
-    '--win',
-    '--x64',
-    '--publish',
-    'never',
-  ]);
-  await assertFile(nsisPath);
-  await assertFile(portablePath);
+  await run('npm', ['--workspace', '@maka/desktop', 'run', 'package:windows-x64']);
+  await assertFile(exePath);
+  await assertFile(zipPath);
+  await assertFile(updateMetadataPath);
+  // win-unpacked stays: the ZIP is an archive of exactly this directory, so it
+  // is what the verifier inspects. Extracting the ZIP would only rebuild a copy
+  // of it, and writing tens of thousands of small files on Windows costs more
+  // than the entire packaging step. It is not a release asset — the upload
+  // globs match artifacts by name — and the release directory is rebuilt from
+  // scratch on the next run.
+  await assertFile(unpackedDirectory);
 
-  return { nsisPath, portablePath };
+  return { exePath, zipPath, unpackedDirectory };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { nsisPath, portablePath } = await packageWindowsX64();
-  console.log(`Created NSIS installer: ${nsisPath}`);
-  console.log(`Created portable: ${portablePath}`);
+  const { exePath } = await packageWindowsX64();
+  console.log(`Created ${exePath}`);
 }
