@@ -432,7 +432,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setSaving(true);
     try {
       await window.maka.usage.putPricingOverride({ modelKey, inputUsdPer1M, outputUsdPer1M, ...(cacheReadUsdPer1M !== undefined ? { cacheReadUsdPer1M } : {}), ...(cacheWriteUsdPer1M !== undefined ? { cacheWriteUsdPer1M } : {}) });
-      toast.success(props.copy.tables.pricingAddSuccess);
+      
       await loadPricing();
     } catch (error) {
       toast.error(props.copy.tables.pricingAddFailed, String(error));
