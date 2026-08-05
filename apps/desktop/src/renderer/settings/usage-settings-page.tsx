@@ -515,6 +515,17 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setNewCacheRead('');
     setNewCacheWrite('');
   }
+  function navigateRow(currentKey: string, field: string, direction: number) {
+    const modelKeysList = Array.from(modelKeys);
+    const idx = modelKeysList.indexOf(currentKey);
+    const nextKey = modelKeysList[idx + direction];
+    if (nextKey) {
+      const nextRow = overrides.find((o) => o.modelKey === nextKey);
+      const nextValue = field === 'input' ? nextRow?.inputUsdPer1M : field === 'output' ? nextRow?.outputUsdPer1M : field === 'cacheRead' ? nextRow?.cacheReadUsdPer1M : nextRow?.cacheWriteUsdPer1M;
+      startEdit(nextKey, field, nextValue);
+    }
+  }
+
 
   function handleSaveNew() {
     const key = newModelKey.trim();
@@ -547,7 +558,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
           width={100}
           onBlur={() => saveEdit(false)}
           data-pricing-edit="true"
-          onKeyDown={(e: any) => { if (e.key === 'Enter') saveEdit(true); }}
+          onKeyDown={(e: any) => { if (e.key === 'Enter') { e.preventDefault(); saveEdit(true); } else if (e.key === 'ArrowDown') { e.preventDefault(); saveEdit(false); setTimeout(() => navigateRow(modelKey, field, 1), 50); } else if (e.key === 'ArrowUp') { e.preventDefault(); saveEdit(false); setTimeout(() => navigateRow(modelKey, field, -1), 50); } }}
         />
       );
     }
