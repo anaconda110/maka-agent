@@ -395,6 +395,16 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [newCacheWrite, setNewCacheWrite] = useState('');
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (editingKey) {
+      const timer = setTimeout(() => {
+        const input = document.querySelector('input[data-pricing-edit="true"]') as HTMLInputElement;
+        if (input) { input.focus(); input.select(); }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [editingKey, editingField]);
+
   const loadPricing = async () => {
     setLoading(true);
     try {
@@ -505,7 +515,7 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
           onChange={setEditingValue}
           width={100}
           onBlur={saveEdit}
-          autoFocus
+          data-pricing-edit="true"
           onKeyDown={(e: any) => { if (e.key === 'Enter') saveEdit(); }}
         />
       );
