@@ -40,7 +40,7 @@ import type {
   E2eFixtureState,
   ArtifactBinaryReadResult,
   ArtifactChangedEvent,
-  ArtifactRecord,
+  ArtifactDescriptor,
   ArtifactSaveResult,
   ArtifactTextReadResult,
   BranchFromTurnInput,
@@ -682,20 +682,8 @@ export interface MakaBridge {
       | { ok: true; projectPath: string; projectGit: { isGitRepo: boolean; branch?: string } }
       | { ok: false; reason: 'invalid-path' | 'not-found' }
     >;
-    listGitBranches(sessionId?: string): Promise<{
-      ok: boolean;
-      branches?: string[];
-      current?: string;
-      reason?: string;
-      message?: string;
-    }>;
-    checkoutGitBranch(branch: string, sessionId?: string): Promise<{
-      ok: boolean;
-      branch?: string;
-      reason?: string;
-      message?: string;
-    }>;
     openArtifactPath(
+      sessionId: string,
       artifactId: string,
     ): Promise<
       | { ok: true; opened: string }
@@ -709,7 +697,7 @@ export interface MakaBridge {
             | 'open-failed';
         }
     >;
-    saveArtifactAs(artifactId: string): Promise<ArtifactSaveResult>;
+    saveArtifactAs(sessionId: string, artifactId: string): Promise<ArtifactSaveResult>;
   };
   workspace: {
     searchFiles(
@@ -724,11 +712,11 @@ export interface MakaBridge {
     getState(): Promise<E2eFixtureState | null>;
   };
   artifacts: {
-    list(sessionId: string, opts?: { includeDeleted?: boolean }): Promise<ArtifactRecord[]>;
-    get(artifactId: string): Promise<ArtifactRecord | null>;
-    readText(artifactId: string): Promise<ArtifactTextReadResult>;
-    readBinary(artifactId: string): Promise<ArtifactBinaryReadResult>;
-    delete(artifactId: string): Promise<void>;
+    list(sessionId: string, opts?: { includeDeleted?: boolean }): Promise<ArtifactDescriptor[]>;
+    get(sessionId: string, artifactId: string): Promise<ArtifactDescriptor | null>;
+    readText(sessionId: string, artifactId: string): Promise<ArtifactTextReadResult>;
+    readBinary(sessionId: string, artifactId: string): Promise<ArtifactBinaryReadResult>;
+    delete(sessionId: string, artifactId: string): Promise<void>;
     subscribeChanges(handler: (event: ArtifactChangedEvent) => void): () => void;
   };
   skills: {
