@@ -386,10 +386,14 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
   const [editingKey, setEditingKey] = useState('');
   const [editingInput, setEditingInput] = useState('');
   const [editingOutput, setEditingOutput] = useState('');
+  const [editingCacheRead, setEditingCacheRead] = useState('');
+  const [editingCacheWrite, setEditingCacheWrite] = useState('');
   const [addingNew, setAddingNew] = useState(false);
   const [newModelKey, setNewModelKey] = useState('');
   const [newInput, setNewInput] = useState('');
   const [newOutput, setNewOutput] = useState('');
+  const [newCacheRead, setNewCacheRead] = useState('');
+  const [newCacheWrite, setNewCacheWrite] = useState('');
   const [saving, setSaving] = useState(false);
 
   const loadPricing = async () => {
@@ -413,10 +417,10 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleSave(modelKey: string, inputUsdPer1M: number, outputUsdPer1M: number) {
+  async function handleSave(modelKey: string, inputUsdPer1M: number, outputUsdPer1M: number, cacheReadUsdPer1M?: number, cacheWriteUsdPer1M?: number) {
     setSaving(true);
     try {
-      await window.maka.usage.putPricingOverride({ modelKey, inputUsdPer1M, outputUsdPer1M });
+      await window.maka.usage.putPricingOverride({ modelKey, inputUsdPer1M, outputUsdPer1M, ...(cacheReadUsdPer1M !== undefined ? { cacheReadUsdPer1M } : {}), ...(cacheWriteUsdPer1M !== undefined ? { cacheWriteUsdPer1M } : {}) });
       toast.success(props.copy.tables.pricingAddSuccess);
       setEditingKey('');
       await loadPricing();
@@ -438,10 +442,12 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     }
   }
 
-  function handleEdit(modelKey: string, input: number, output: number) {
+  function handleEdit(modelKey: string, input: number, output: number, cacheRead?: number, cacheWrite?: number) {
     setEditingKey(modelKey);
     setEditingInput(String(input));
     setEditingOutput(String(output));
+    setEditingCacheRead(cacheRead !== undefined ? String(cacheRead) : '');
+    setEditingCacheWrite(cacheWrite !== undefined ? String(cacheWrite) : '');
   }
 
   function handleSaveEdit() {
@@ -452,7 +458,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       toast.error(props.copy.tables.pricingValidationFailed, props.copy.tables.pricingRateInvalid);
       return;
     }
-    void handleSave(key, input, output);
+    const cacheRead = editingCacheRead.trim() !== '' ? Number(editingCacheRead) : undefined;
+    const cacheWrite = editingCacheWrite.trim() !== '' ? Number(editingCacheWrite) : undefined;
+    void handleSave(key, input, output, cacheRead, cacheWrite);
   }
 
   function handleAddNew() {
@@ -460,6 +468,8 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
     setNewModelKey('');
     setNewInput('');
     setNewOutput('');
+    setNewCacheRead('');
+    setNewCacheWrite('');
   }
 
   function handleSaveNew() {
@@ -474,7 +484,9 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
       toast.error(props.copy.tables.pricingValidationFailed, props.copy.tables.pricingRateInvalid);
       return;
     }
-    void handleSave(key, input, output).then(() => {
+    const cacheRead = newCacheRead.trim() !== '' ? Number(newCacheRead) : undefined;
+    const cacheWrite = newCacheWrite.trim() !== '' ? Number(newCacheWrite) : undefined;
+    void handleSave(key, input, output, cacheRead, cacheWrite).then(() => {
       setAddingNew(false);
       setNewModelKey('');
       setNewInput('');
@@ -497,6 +509,12 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                 </th>
                 <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
                   {props.copy.tables.pricingOutputLabel}
+                </th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                  {props.copy.tables.pricingCacheReadLabel}
+                </th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
+                  {props.copy.tables.pricingCacheWriteLabel}
                 </th>
                 <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border-1)' }}>
                   {props.copy.tables.pricingResetButton}
@@ -534,10 +552,42 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       />
                     ) : (
                       <span
-                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M)}
+                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
                         style={{ cursor: 'pointer' }}
                       >
                         {row.outputUsdPer1M}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                    {editingKey === row.modelKey ? (
+                      <TextInput
+                        value={editingCacheRead}
+                        onChange={setEditingCacheRead}
+                        width={100}
+                      />
+                    ) : (
+                      <span
+                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {row.cacheReadUsdPer1M ?? '-'}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                    {editingKey === row.modelKey ? (
+                      <TextInput
+                        value={editingCacheWrite}
+                        onChange={setEditingCacheWrite}
+                        width={100}
+                      />
+                    ) : (
+                      <span
+                        onClick={() => handleEdit(row.modelKey, row.inputUsdPer1M, row.outputUsdPer1M, row.cacheReadUsdPer1M, row.cacheWriteUsdPer1M)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {row.cacheWriteUsdPer1M ?? '-'}
                       </span>
                     )}
                   </td>
@@ -592,6 +642,22 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
                       value={newOutput}
                       onChange={setNewOutput}
                       placeholder={props.copy.tables.pricingOutputPlaceholder}
+                      width={100}
+                    />
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                    <TextInput
+                      value={newCacheRead}
+                      onChange={setNewCacheRead}
+                      placeholder={props.copy.tables.pricingCacheReadPlaceholder}
+                      width={100}
+                    />
+                  </td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border-1)' }}>
+                    <TextInput
+                      value={newCacheWrite}
+                      onChange={setNewCacheWrite}
+                      placeholder={props.copy.tables.pricingCacheWritePlaceholder}
                       width={100}
                     />
                   </td>
