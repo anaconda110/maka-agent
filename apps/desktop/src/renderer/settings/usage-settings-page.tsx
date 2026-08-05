@@ -403,10 +403,8 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
 
   useEffect(() => {
     void loadPricing();
-    const { ipcRenderer } = window.require('electron');
-    const listener = () => void loadPricing();
-    ipcRenderer.on('usage:pricing:changed', listener);
-    return () => { ipcRenderer.off('usage:pricing:changed', listener); };
+    const unsubscribe = window.maka.usage.subscribePricingChanged(() => void loadPricing());
+    return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

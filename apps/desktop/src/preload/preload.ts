@@ -1231,6 +1231,11 @@ const makaBridge = {
     resetPricingOverride(modelKey: string): Promise<void> {
       return ipcRenderer.invoke('usage:pricing:reset', modelKey);
     },
+    subscribePricingChanged(handler: () => void): () => void {
+      const listener = () => handler();
+      ipcRenderer.on('usage:pricing:changed', listener);
+      return () => ipcRenderer.off('usage:pricing:changed', listener);
+    },
   },
   // Embedded browser (P3). The native WebContentsView floats above the DOM; the
   // renderer panel only mirrors its strip's rect and drives navigation. No
