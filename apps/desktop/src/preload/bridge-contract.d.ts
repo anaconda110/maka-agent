@@ -796,6 +796,7 @@ export interface MakaBridge {
     listPricingOverrides(): Promise<PricingConfig[]>;
     putPricingOverride(config: PricingConfig): Promise<PricingConfig>;
     resetPricingOverride(modelKey: string): Promise<void>;
+    subscribePricingChanged(handler: () => void): () => void;
   };
   browser: {
     setActiveSession(sessionId: string | null): void;
