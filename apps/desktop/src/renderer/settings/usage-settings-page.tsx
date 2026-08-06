@@ -499,7 +499,12 @@ function UsagePricingPanel(props: {
     if (!pending) return;
     const { key, field } = pending;
     const entry = entries.find((e) => e.pricing.modelKey === key);
-    if (editingNumber === null && (field === 'input' || field === 'output')) {
+    // Cleared (null) or zeroed (0) a required field (input/output) → delete the
+    // whole record. A 0 rate is treated as "not configured" (equivalent to
+    // unpriced), so setting input/output to 0 auto-resets rather than persisting
+    // a meaningless 0-price record. Cache fields (cacheRead/cacheWrite) are
+    // optional, so 0 there is kept (upserted) — it only zeroes that cache cost.
+    if ((editingNumber === null || editingNumber === 0) && (field === 'input' || field === 'output')) {
       void runMutation({ kind: 'delete', modelKey: key });
       return;
     }
@@ -536,6 +541,14 @@ function UsagePricingPanel(props: {
     if (!key) { toast.error(props.copy.tables.pricingModelKeyRequired, props.copy.tables.pricingModelKeyRequired); return; }
     if (!Number.isFinite(input) || input < 0 || !Number.isFinite(output) || output < 0) {
       toast.error(props.copy.tables.pricingRateInvalid, props.copy.tables.pricingRateInvalid);
+      return;
+    }
+    // A 0 input or output rate means "not configured" (consistent with the
+    // auto-reset on edit): creating a 0-price record is meaningless, so just
+    // close the add-row form without persisting.
+    if (input === 0 || output === 0) {
+      setAddingNew(false);
+      setNewModelKey(''); setNewInput(''); setNewOutput(''); setNewCacheRead(''); setNewCacheWrite('');
       return;
     }
     const cacheRead = newCacheRead.trim() !== '' ? Number(newCacheRead) : undefined;
