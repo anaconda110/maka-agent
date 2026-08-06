@@ -527,7 +527,6 @@ function UsagePricingPanel(props: {
     await handleReset(modelKey);
   }
   async function handleReset(modelKey: string) {
-    if (!window.confirm(props.copy.tables.pricingResetConfirm)) return;
     const ok = await runMutation({ kind: 'delete', modelKey });
     if (ok) toast.success(props.copy.tables.pricingResetSuccess);
   }
