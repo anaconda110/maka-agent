@@ -403,7 +403,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: @astryxdesign/core@0.2.0
+Package: @astryxdesign/core@0.3.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/facebook/astryx.git#packages/core
@@ -433,7 +433,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: @astryxdesign/theme-neutral@0.2.0
+Package: @astryxdesign/theme-neutral@0.3.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/facebook/astryx.git#packages/themes/neutral
@@ -882,7 +882,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: @jackwener/opencli@1.8.4
+Package: @jackwener/opencli@1.8.6
 Declared license: Apache-2.0
 Selected license: Apache-2.0
 Repository: git+https://github.com/jackwener/opencli.git
@@ -1081,7 +1081,7 @@ Apache License
 
 ================================================================================
 
-Package: @larksuiteoapi/node-sdk@1.71.1
+Package: @larksuiteoapi/node-sdk@1.72.0
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/larksuite/node-sdk.git
@@ -1530,7 +1530,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================================
 
-Package: @slack/logger@4.0.1
+Package: @slack/logger@5.0.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/slackapi/node-slack-sdk.git
@@ -1561,7 +1561,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-Package: @slack/socket-mode@2.0.7
+Package: @slack/socket-mode@3.0.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/slackapi/node-slack-sdk.git
@@ -1592,7 +1592,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-Package: @slack/types@2.22.0
+Package: @slack/types@3.0.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/slackapi/node-slack-sdk.git
@@ -1623,7 +1623,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-Package: @slack/web-api@7.19.0
+Package: @slack/web-api@8.0.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/slackapi/node-slack-sdk.git
@@ -2674,7 +2674,7 @@ MIT License
 
 ================================================================================
 
-Package: @types/node@25.9.0
+Package: @types/node@26.1.2
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/DefinitelyTyped/DefinitelyTyped.git#types/node
@@ -2738,36 +2738,6 @@ Package: @types/trusted-types@2.0.7
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/DefinitelyTyped/DefinitelyTyped.git#types/trusted-types
-
---- LICENSE ---
-MIT License
-
-    Copyright (c) Microsoft Corporation.
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE
-
-================================================================================
-
-Package: @types/ws@8.18.1
-Declared license: MIT
-Selected license: MIT
-Repository: https://github.com/DefinitelyTyped/DefinitelyTyped.git#types/ws
 
 --- LICENSE ---
 MIT License
@@ -3169,7 +3139,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-Package: acorn@8.17.0
+Package: acorn@8.18.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/acornjs/acorn.git
@@ -3229,7 +3199,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: agent-base@7.1.4
+Package: agent-base@9.0.0
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/TooTallNate/proxy-agents.git#packages/agent-base
@@ -8687,7 +8657,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: https-proxy-agent@7.0.6
+Package: https-proxy-agent@9.1.0
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/TooTallNate/proxy-agents.git#packages/https-proxy-agent
@@ -9073,36 +9043,6 @@ THE SOFTWARE.
 
 ================================================================================
 
-Package: is-electron@2.2.2
-Declared license: MIT
-Selected license: MIT
-Repository: git@github.com:cheton/is-electron.git
-
---- LICENSE ---
-The MIT License (MIT)
-
-Copyright (c) 2016-2018 Cheton Wu
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-================================================================================
-
 Package: is-fullwidth-code-point@3.0.0
 Declared license: MIT
 Selected license: MIT
@@ -9146,24 +9086,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-================================================================================
-
-Package: is-stream@2.0.1
-Declared license: MIT
-Selected license: MIT
-Repository: sindresorhus/is-stream
-
---- license ---
-MIT License
-
-Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
@@ -10324,54 +10246,6 @@ THE SOFTWARE.
 
 ================================================================================
 
-Package: lucide-react@0.577.0
-Declared license: ISC
-Selected license: ISC
-Repository: https://github.com/lucide-icons/lucide.git#packages/lucide-react
-
---- LICENSE ---
-ISC License
-
-Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2026 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2026.
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
----
-
-The MIT License (MIT) (for portions derived from Feather)
-
-Copyright (c) 2013-2026 Cole Bemis
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-================================================================================
-
 Package: lucide-react@1.28.0
 Declared license: ISC
 Selected license: ISC
@@ -11485,6 +11359,36 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
+Package: proxy-agent-negotiate@1.1.0
+Declared license: MIT
+Selected license: MIT
+Repository: https://github.com/TooTallNate/proxy-agents.git#packages/negotiate
+
+--- VERSION-PINNED LICENSE TEXT OVERRIDE ---
+MIT License
+
+Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
 Package: proxy-from-env@2.1.0
 Declared license: MIT
 Selected license: MIT
@@ -11633,10 +11537,10 @@ THE SOFTWARE.
 
 ================================================================================
 
-Package: react@19.2.6
+Package: react@19.2.8
 Declared license: MIT
 Selected license: MIT
-Repository: https://github.com/facebook/react.git#packages/react
+Repository: https://github.com/react/react.git#packages/react
 
 --- LICENSE ---
 MIT License
@@ -11663,10 +11567,10 @@ SOFTWARE.
 
 ================================================================================
 
-Package: react-dom@19.2.6
+Package: react-dom@19.2.8
 Declared license: MIT
 Selected license: MIT
-Repository: https://github.com/facebook/react.git#packages/react-dom
+Repository: https://github.com/react/react.git#packages/react-dom
 
 --- LICENSE ---
 MIT License
@@ -12620,7 +12524,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
-Package: socks-proxy-agent@8.0.5
+Package: socks-proxy-agent@10.1.0
 Declared license: MIT
 Selected license: MIT
 Repository: https://github.com/TooTallNate/proxy-agents.git#packages/socks-proxy-agent
@@ -13144,7 +13048,7 @@ SOFTWARE.
 
 ================================================================================
 
-Package: undici-types@7.24.6
+Package: undici-types@8.3.0
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/nodejs/undici.git
@@ -13581,7 +13485,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ================================================================================
 
-Package: ws@8.21.0
+Package: ws@8.21.2
 Declared license: MIT
 Selected license: MIT
 Repository: git+https://github.com/websockets/ws.git
