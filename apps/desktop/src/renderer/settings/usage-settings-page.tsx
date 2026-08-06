@@ -527,8 +527,7 @@ function UsagePricingPanel(props: {
     await handleReset(modelKey);
   }
   async function handleReset(modelKey: string) {
-    const ok = await runMutation({ kind: 'delete', modelKey });
-    if (ok) toast.success(props.copy.tables.pricingResetSuccess);
+    await runMutation({ kind: 'delete', modelKey });
   }
   async function handleSaveNew() {
     const key = newModelKey.trim();
