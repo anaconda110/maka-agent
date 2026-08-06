@@ -1587,6 +1587,11 @@ export {
   resolveModelVisionSupport,
   resolveModelVoiceMetadata,
 } from './model-metadata.js';
+// model-pricing.ts — re-export of the PricingConfig type for the generated
+// pricing module; the generated array itself is exported below.
+export type { PricingConfig as ModelPricingConfig } from './model-pricing.js';
+// model-pricing.generated.ts — generated pricing from models.dev (#2329).
+export { GENERATED_PRICING } from './model-pricing.generated.js';
 export type {
   HostedWebSearchAdapter,
   HostedWebSearchCapability,

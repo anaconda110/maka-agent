@@ -19,7 +19,15 @@ export type ModelUnavailableReason =
   | 'stale';
 
 export type ModelCatalogAvailability = 'available' | 'warning' | 'blocked';
-export type ModelCatalogLifecycle = 'active' | 'deprecated' | 'retired' | 'unknown';
+// 'beta'/'alpha' surface pre-release models distinctly from models.dev status
+// (#2329); previously folded into 'active'.
+export type ModelCatalogLifecycle =
+  | 'active'
+  | 'beta'
+  | 'alpha'
+  | 'deprecated'
+  | 'retired'
+  | 'unknown';
 
 export interface KnownModelCapabilities {
   chat?: true;

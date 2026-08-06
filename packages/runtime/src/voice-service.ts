@@ -336,7 +336,21 @@ export function createVoiceService(deps: VoiceServiceDependencies): VoiceService
     const openAiWire = adapterKind === 'openai' || adapterKind === 'openai-compatible';
     const endpointRoles = [...(metadata.endpointRoles ?? [])];
     const transports = [...(metadata.transports ?? [])];
-    let modalities = metadata.modalities ?? { input: ['text' as const], output: ['text' as const] };
+    // Voice routing only consumes audio/text/image modalities; strip 'pdf' so
+    // the widened input-modality type (#2329) does not leak into the narrower
+    // VoiceModelRouteCapability shape.
+    const stripPdf = (mods: ReadonlyArray<unknown>) =>
+      mods.filter((m) => m !== 'pdf') as Array<'text' | 'image' | 'audio'>;
+    const stripModalityPair = (mods: {
+      input: ReadonlyArray<unknown>;
+      output: ReadonlyArray<unknown>;
+    }) => ({
+      input: stripPdf(mods.input),
+      output: stripPdf(mods.output),
+    });
+    let modalities = metadata.modalities
+      ? stripModalityPair(metadata.modalities)
+      : { input: ['text' as const], output: ['text' as const] };
     if (roleHint === 'transcription') {
       if (!endpointRoles.includes('transcription')) endpointRoles.push('transcription');
       if (!transports.includes('openai_audio_transcriptions')) {

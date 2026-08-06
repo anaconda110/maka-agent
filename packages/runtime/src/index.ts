@@ -951,6 +951,7 @@ export {
   buildDefaultContextBudgetPolicy,
   buildManualCompactLookupPolicy,
   resolveSelectedModelContextWindow,
+  resolveSelectedModelMaxInputTokens,
 } from './context-budget-policy.js';
 export type {
   BuildDefaultContextBudgetPolicyOptions,

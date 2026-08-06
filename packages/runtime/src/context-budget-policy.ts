@@ -15,10 +15,17 @@ export function buildDefaultContextBudgetPolicy(
   const env = options.env ?? process.env;
   if (env.MAKA_CONTEXT_BUDGET === 'off') return undefined;
   const contextWindow = resolveSelectedModelContextWindow(connection, options.modelId);
-  const reserveTokens = defaultCompactReserveTokens(env, contextWindow);
+  // Issue #2329: budget against the true input ceiling (maxInputTokens) when
+  // the model declares one, rather than contextWindow. A model like gpt-5.2
+  // (context 400K but input 272K) over-admits history if the budget uses the
+  // larger contextWindow. Context-size decisions (compaction, skill budget)
+  // keep using contextWindow; the *admission* budget uses the input limit.
+  const maxInputTokens = resolveSelectedModelMaxInputTokens(connection, options.modelId);
+  const inputBudgetCeiling = maxInputTokens ?? contextWindow;
+  const reserveTokens = defaultCompactReserveTokens(env, inputBudgetCeiling);
   const maxHistoryEstimatedTokens =
     parseOptionalPositiveInt(env.MAKA_CONTEXT_HISTORY_BUDGET_TOKENS) ??
-    defaultHistoryBudgetTokens(connection, contextWindow, reserveTokens);
+    defaultHistoryBudgetTokens(connection, inputBudgetCeiling, reserveTokens);
   const maxHistoryTurns = parseOptionalPositiveInt(env.MAKA_CONTEXT_HISTORY_BUDGET_TURNS);
   const minRecentTurns = parsePositiveInt(env.MAKA_CONTEXT_MIN_RECENT_TURNS, 2);
   const surfaceName = (options.name ?? 'default-history-budget').replace(
@@ -420,6 +427,28 @@ export function resolveSelectedModelContextWindow(
     (selectedModelId
       ? lookupModelMetadata(connection.providerType, selectedModelId).contextWindow
       : undefined)
+  );
+}
+
+/**
+ * Resolve the model's true input ceiling — models.dev `limit.input`
+ * (`maxInputTokens`) when present, falling back to `contextWindow` otherwise
+ * (#2329). Use this for input-preflight / input-budget decisions so a model
+ * like gpt-5.2 (context 400K but input 272K) does not over-admit input beyond
+ * what it can actually take. Context-size decisions (history compaction, skill
+ * budget) should keep using {@link resolveSelectedModelContextWindow}.
+ */
+export function resolveSelectedModelMaxInputTokens(
+  connection: RuntimeExecutionConnection,
+  modelId: string | undefined,
+): number | undefined {
+  const selectedModelId = modelId ?? connection.defaultModel;
+  if (!selectedModelId) return resolveSelectedModelContextWindow(connection, modelId);
+  const metadata = lookupModelMetadata(connection.providerType, selectedModelId);
+  return (
+    metadata.maxInputTokens ??
+    metadata.contextWindow ??
+    resolveSelectedModelContextWindow(connection, modelId)
   );
 }
 

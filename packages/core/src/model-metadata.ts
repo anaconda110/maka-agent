@@ -7,15 +7,52 @@ import {
 
 export interface ModelMetadata {
   displayName?: string;
-  lifecycle?: 'active' | 'deprecated' | 'retired';
+  /**
+   * Lifecycle status. models.dev `status` is preserved verbatim — 'beta' and
+   * 'alpha' are no longer folded into 'active' so the model picker can surface
+   * pre-release models distinctly (#2329).
+   */
+  lifecycle?: 'active' | 'beta' | 'alpha' | 'deprecated' | 'retired';
   docsUrl?: string;
   contextWindow?: number;
   maxOutputTokens?: number;
+  /**
+   * Maximum input tokens the model accepts (`models.dev` `limit.input`). When
+   * present, context-budget policy uses this instead of `contextWindow` to
+   * avoid over-accepting input beyond the model's true input ceiling (#2329).
+   */
+  maxInputTokens?: number;
   capabilities?: ModelInfo['capabilities'];
   modalities?: ModelInfo['modalities'];
   endpointRoles?: ModelInfo['endpointRoles'];
   transports?: ModelInfo['transports'];
   transcriptOutput?: boolean;
+  /**
+   * Short human-readable description from models.dev (100% coverage). Lets the
+   * model picker distinguish same-family models by purpose (#2329).
+   */
+  description?: string;
+  /**
+   * Knowledge cutoff date (ISO `YYYY-MM-DD`), from models.dev `knowledge`
+   * (~53% coverage). Surfaced in the model picker so users see how stale a
+   * model's training data is (#2329).
+   */
+  knowledgeCutoff?: string;
+  /**
+   * Whether the model supports structured/JSON-schema output
+   * (`models.dev` `structured_output`, ~62% coverage) (#2329).
+   */
+  structuredOutput?: boolean;
+  /**
+   * Whether the model accepts PDF input (models.dev PDF form in
+   * `input_modalities`, previously dropped by the sync filter) (#2329).
+   */
+  pdfInput?: boolean;
+  /**
+   * Freshness: when models.dev last updated this model's facts
+   * (`last_updated`, 100% coverage, ISO date) (#2329).
+   */
+  lastUpdated?: string;
   /**
    * Per-model reasoning controls, mirroring models.dev `reasoning_options`.
    * Omitted on models with no declarable thinking knob (miss → no menu).

@@ -68,7 +68,10 @@ export interface ModelInfo {
    * metadata, endpoint role, and an implemented adapter at the same time.
    */
   modalities?: {
-    input: Array<'text' | 'image' | 'audio'>;
+    // 'pdf' covers models.dev PDF input form (previously dropped by the sync
+    // filter). Surfaced as an input modality so consumers can detect PDF input
+    // support; output never emits 'pdf' (#2329).
+    input: Array<'text' | 'image' | 'audio' | 'pdf'>;
     output: Array<'text' | 'image' | 'audio'>;
   };
   endpointRoles?: Array<
