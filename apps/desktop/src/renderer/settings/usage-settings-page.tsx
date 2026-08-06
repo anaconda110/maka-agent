@@ -593,9 +593,42 @@ function UsagePricingPanel(props: { stats: UsageStats | null; copy: UsageSetting
             }
           }
           else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault();
             const nextKey = allModels[allModels.indexOf(modelKey) + (e.key === 'ArrowDown' ? 1 : -1)];
-            if (nextKey) moveTo(nextKey, field);
+            if (nextKey) {
+              e.preventDefault();
+              moveTo(nextKey, field);
+            }
+            // First row ↑ / last row ↓: do nothing — stay editing, caret moves naturally.
+          }
+          else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            const idx = fieldOrder.indexOf(field);
+            if (e.key === 'ArrowRight') {
+              const nextField = fieldOrder[idx + 1];
+              if (nextField) {
+                e.preventDefault();
+                moveTo(modelKey, nextField);
+              } else {
+                const nextKey = allModels[allModels.indexOf(modelKey) + 1];
+                if (nextKey) {
+                  e.preventDefault();
+                  moveTo(nextKey, 'input');
+                }
+                // Last row, last column: do nothing — stay editing, caret moves naturally.
+              }
+            } else {
+              const prevField = fieldOrder[idx - 1];
+              if (prevField) {
+                e.preventDefault();
+                moveTo(modelKey, prevField);
+              } else {
+                const prevKey = allModels[allModels.indexOf(modelKey) - 1];
+                if (prevKey) {
+                  e.preventDefault();
+                  moveTo(prevKey, 'cacheWrite');
+                }
+                // First row, first column: do nothing — stay editing, caret moves naturally.
+              }
+            }
           }
         }}
         />
