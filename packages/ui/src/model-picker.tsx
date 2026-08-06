@@ -19,6 +19,7 @@ import type { ProviderType } from '@maka/core';
 import type { ModelMenuGroup } from './chat-model-helpers.js';
 import {
   buildModelPickerOptions,
+  buildModelPickerOptionMeta,
   buildModelPickerProviderTypes,
   type ModelPickerLeadingOption,
 } from './model-picker-internals.js';
@@ -54,6 +55,12 @@ export function ModelPicker(props: ModelPickerProps) {
     () => buildModelPickerProviderTypes(props.groups, props.leadingOption),
     [props.groups, props.leadingOption],
   );
+  // Per-option models.dev facts (description / knowledge cutoff / lastUpdated)
+  // for the picker to surface (#2329). Provider-discovered models omit them.
+  const optionMeta = useMemo(
+    () => buildModelPickerOptionMeta(props.groups),
+    [props.groups],
+  );
 
   // size=md matches the other settings-row selectors. Settings is the only
   // production host since the composer footer moved to ghost DropdownMenus,
@@ -85,11 +92,26 @@ export function ModelPicker(props: ModelPickerProps) {
                 {props.renderProviderMark(providerType)}
               </span>
             ) : undefined;
+          const meta = optionMeta.get(option.value);
           return (
             <SelectorOption
               className="modelPickerOption"
               icon={providerMark}
-              label={<span className="modelPickerOptionLabel">{option.label ?? option.value}</span>}
+              label={
+                <span className="modelPickerOptionLabel">
+                  <span>{option.label ?? option.value}</span>
+                  {meta ? (
+                    <span className="modelPickerOptionMeta">
+                      {meta.description ? <span className="modelPickerOptionDescription">{meta.description}</span> : null}
+                      {meta.knowledgeCutoff ? (
+                        <span className="modelPickerOptionKnowledge" title={meta.lastUpdated ? `Updated ${meta.lastUpdated}` : undefined}>
+                          {copy.knowledgeAsOf(meta.knowledgeCutoff)}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </span>
+              }
             />
           );
         }}

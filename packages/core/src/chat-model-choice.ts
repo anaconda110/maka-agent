@@ -1,5 +1,6 @@
 import { normalizeOpenAiCodexConnection } from './connection-readiness.js';
 import { buildConnectionModelCatalogEntries } from './model-catalog.js';
+import { lookupModelMetadata } from './model-metadata.js';
 import { thinkingVariantsForModel, type ThinkingLevel } from './model-thinking.js';
 import {
   CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS,
@@ -33,6 +34,12 @@ export interface ChatModelChoice {
   connectionName?: string;
   isDefault: boolean;
   thinkingLevels: readonly ThinkingLevel[];
+  /** Short description from models.dev, lets the picker distinguish same-family models (#2329). */
+  description?: string;
+  /** Knowledge cutoff date (ISO), surfaced so users see how stale a model is (#2329). */
+  knowledgeCutoff?: string;
+  /** When models.dev last updated this model's facts (ISO), for freshness hints (#2329). */
+  lastUpdated?: string;
 }
 
 export function buildChatModelChoices(connections: readonly LlmConnection[]): ChatModelChoice[] {
@@ -67,6 +74,17 @@ export function buildChatModelChoices(connections: readonly LlmConnection[]): Ch
         ...(provider.authKind === 'oauth_token' ? {} : { connectionName: connection.name }),
         isDefault: entry.isDefault,
         thinkingLevels: thinkingVariantsForModel(connection.providerType, entry.id),
+        // Surface models.dev facts so the picker can show description +
+        // knowledge cutoff + freshness (#2329). Provider-discovered models
+        // (not in the generated snapshot) simply omit them.
+        ...((): { description?: string; knowledgeCutoff?: string; lastUpdated?: string } => {
+          const meta = lookupModelMetadata(connection.providerType, entry.id);
+          return {
+            ...(meta.description ? { description: meta.description } : {}),
+            ...(meta.knowledgeCutoff ? { knowledgeCutoff: meta.knowledgeCutoff } : {}),
+            ...(meta.lastUpdated ? { lastUpdated: meta.lastUpdated } : {}),
+          };
+        })(),
       });
     }
   }

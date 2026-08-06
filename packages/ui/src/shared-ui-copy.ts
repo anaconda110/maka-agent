@@ -42,6 +42,7 @@ export interface SharedUiCopy {
   };
   modelPicker: {
     searchPlaceholder: string;
+    knowledgeAsOf: (date: string) => string;
   };
   moduleHubs: {
     extensions: {
@@ -147,6 +148,7 @@ const SHARED_UI_COPY = {
     },
     modelPicker: {
       searchPlaceholder: '搜索模型…',
+      knowledgeAsOf: (date) => `知识截至 ${date}`,
     },
     moduleHubs: {
       extensions: {
@@ -235,6 +237,7 @@ const SHARED_UI_COPY = {
     },
     modelPicker: {
       searchPlaceholder: 'Search models…',
+      knowledgeAsOf: (date) => `Knowledge as of ${date}`,
     },
     moduleHubs: {
       extensions: {

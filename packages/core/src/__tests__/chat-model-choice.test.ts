@@ -30,6 +30,11 @@ test('projects only enabled chat models with display, default, and thinking meta
       connectionName: 'Work API',
       isDefault: true,
       thinkingLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+      // #2329: models.dev facts surfaced for the picker (description +
+      // knowledge cutoff + freshness). Values track the generated snapshot.
+      description: 'Default frontier GPT for coding, computer use, research, and knowledge work',
+      knowledgeCutoff: '2025-12-01',
+      lastUpdated: '2026-04-23',
     },
   ]);
 });
