@@ -30,6 +30,7 @@ import {
   Button,
   IconButton,
   TextInput,
+  NumberInput,
   Selector,
   Switch,
   useToast,
@@ -395,8 +396,13 @@ function UsagePricingPanel(props: {
   const [entries, setEntries] = useState<EffectivePricingEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingKey, setEditingKey] = useState('');
-  const [editingField, setEditingField] = useState<'input' | 'output' | 'cacheRead' | 'cacheWrite'>('input');
-  const [editingValue, setEditingValue] = useState('');
+  const [editingField, setEditingField] = useState<Field>('input');
+  // NumberInput controlled with `number | null | undefined`:
+  //  - number: a valid (component-validated, min=0) rate
+  //  - null:   user cleared via hasClear → delete record (input/output) or
+  //            omit the cache field (cacheRead/cacheWrite)
+  //  - undefined: the field doesn't exist on the entry yet (placeholder shown)
+  const [editingNumber, setEditingNumber] = useState<number | null | undefined>(undefined);
   const [addingNew, setAddingNew] = useState(false);
   const [newModelKey, setNewModelKey] = useState('');
   const [newInput, setNewInput] = useState('');
@@ -521,7 +527,7 @@ function UsagePricingPanel(props: {
     pendingCommit.current = { key: modelKey, field };
     setEditingKey(modelKey);
     setEditingField(field);
-    setEditingValue(value !== undefined ? String(value) : '');
+    setEditingNumber(value);
   }
 
   // Commit the current edit (if any) and exit edit mode. Called by `onBlur`
@@ -549,46 +555,34 @@ function UsagePricingPanel(props: {
   }
 
   // The shared commit core. Rules:
-  //  - cleared input/output (empty string) → delete the whole pricing record
-  //    (input/output are required, so an empty required field means "no record").
-  //  - cleared cacheRead/cacheWrite → omit that optional field, keep the rest.
-  //  - non-empty value → must be a finite non-negative number, else stay in
-  //    edit mode (don't discard the user's typing) and toast the error.
-  //  - non-edited fields → carry over from the existing entry's values.
+  //  - null + input/output → delete the whole record (required field cleared)
+  //  - null + cacheRead/cacheWrite → omit that optional field, keep the rest
+  //  - number → upsert with that field, carrying over the non-edited fields
+  //  NumberInput guarantees onChange only delivers a valid non-negative number
+  //  or null (cleared via hasClear), so no manual validation/parsing is needed.
   async function applyCommit(pending: { key: string; field: Field } | null) {
     if (!pending) return;
     const { key, field } = pending;
     const entry = entries.find((e) => e.pricing.modelKey === key);
-    const trimmed = editingValue.trim();
 
-    // Cleared a required field (input or output) → delete the whole record.
-    if (trimmed === '' && (field === 'input' || field === 'output')) {
+    // Cleared a required field → delete the whole record.
+    if (editingNumber === null && (field === 'input' || field === 'output')) {
       void runMutation({ kind: 'delete', modelKey: key });
       return;
     }
 
-    // Non-empty value for the edited field — validate.
-    if (trimmed !== '') {
-      const num = Number(trimmed);
-      if (!Number.isFinite(num) || num < 0) {
-        toast.error(props.copy.tables.pricingRateInvalid, props.copy.tables.pricingRateInvalid);
-        // Restore the edit state so the user can fix the invalid input —
-        // don't silently drop what they typed.
-        pendingCommit.current = { key, field };
-        setEditingKey(key);
-        setEditingField(field);
-        return;
-      }
-    }
-
-    // Carry over the non-edited fields from the existing entry.
-    const input = field === 'input' && trimmed !== '' ? Number(trimmed) : entry?.pricing.inputUsdPer1M ?? 0;
-    const output = field === 'output' && trimmed !== '' ? Number(trimmed) : entry?.pricing.outputUsdPer1M ?? 0;
-    // Cleared cache field → omit (undefined); non-edited → carry over; edited → new value.
+    // Carry over the non-edited fields; the edited field uses editingNumber.
+    const input = field === 'input' && editingNumber !== null && editingNumber !== undefined
+      ? editingNumber
+      : entry?.pricing.inputUsdPer1M ?? 0;
+    const output = field === 'output' && editingNumber !== null && editingNumber !== undefined
+      ? editingNumber
+      : entry?.pricing.outputUsdPer1M ?? 0;
+    // Cleared cache field (null) → omit (undefined); non-edited → carry over; edited → new value.
     const cacheRead =
-      field === 'cacheRead' ? (trimmed !== '' ? Number(trimmed) : undefined) : entry?.pricing.cacheReadUsdPer1M;
+      field === 'cacheRead' ? (editingNumber === null ? undefined : editingNumber) : entry?.pricing.cacheReadUsdPer1M;
     const cacheWrite =
-      field === 'cacheWrite' ? (trimmed !== '' ? Number(trimmed) : undefined) : entry?.pricing.cacheWriteUsdPer1M;
+      field === 'cacheWrite' ? (editingNumber === null ? undefined : editingNumber) : entry?.pricing.cacheWriteUsdPer1M;
 
     const pricing: PricingConfig = {
       modelKey: key,
@@ -693,17 +687,16 @@ function UsagePricingPanel(props: {
     const isEditing = editingKey === modelKey && editingField === field;
     if (isEditing) {
       return (
-        <TextInput
+        <NumberInput
           label={fieldLabel[field]}
           isLabelHidden
           hasAutoFocus
-          value={editingValue}
-          onChange={setEditingValue}
+          hasClear
+          min={0}
+          value={editingNumber ?? undefined}
+          onChange={(v) => setEditingNumber(v)}
           width={100}
           onBlur={() => void commit()}
-          ref={(el) => {
-            if (el) el.select();
-          }}
           onKeyDown={(e: React.KeyboardEvent) => {
             if (e.key === 'Enter') {
               e.preventDefault();
