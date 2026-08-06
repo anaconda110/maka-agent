@@ -81,6 +81,8 @@ import {
 import { registerRuntimeHostSkillsIpc } from "./runtime-host-skills-ipc-main.js";
 import { hasRuntimeHostInterruptibleWork } from "./runtime-host-update-activity.js";
 import { registerRuntimeHostUsageIpc } from "./runtime-host-usage-ipc-main.js";
+import { createRuntimeHostPricingPort } from "./runtime-host-pricing-port.js";
+import { registerPricingIpc } from "./pricing-ipc-main.js";
 import { registerRuntimeHostVoiceIpc } from "./runtime-host-voice-ipc-main.js";
 import { registerRuntimeHostWebSearchIpc } from "./runtime-host-web-search-ipc-main.js";
 import { resolveShellEnv } from "./shell-env.js";
@@ -444,6 +446,12 @@ function registerHostClientIpc(
   registerRuntimeHostUsageIpc({
     ipcMain: scopedIpc,
     client,
+    sendToRenderer: (channel, ...args) =>
+      mainWindowController.send(channel, ...args),
+  });
+  registerPricingIpc({
+    ipcMain: scopedIpc,
+    port: createRuntimeHostPricingPort(client),
     sendToRenderer: (channel, ...args) =>
       mainWindowController.send(channel, ...args),
   });

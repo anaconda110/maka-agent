@@ -65,6 +65,7 @@ export type {
   ToolUsageQuery,
 } from './telemetry-repo.js';
 export * from './sqlite-usage-store.js';
+export * from './pricing-store.js';
 export * from './model-call-ledger.js';
 export * from './usage-stores.js';
 export {

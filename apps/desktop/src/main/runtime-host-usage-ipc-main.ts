@@ -1,11 +1,6 @@
 import type { ipcMain as electronIpcMain } from "electron";
 import { tryResult } from "@maka/core/result";
-import {
-  normalizePricingConfig,
-  normalizePricingModelKey,
-} from "@maka/core/usage-stats/pricing";
 import type {
-  PricingConfig,
   UsageGroupBy,
   UsageQuery,
 } from "@maka/core/usage-stats/types";
@@ -23,16 +18,6 @@ const PAGE_LIMIT = 100;
 export function registerRuntimeHostUsageIpc(
   deps: RuntimeHostUsageIpcDeps,
 ): void {
-  let pricingMutationQueue: Promise<void> = Promise.resolve();
-  const enqueuePricingMutation = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = pricingMutationQueue.then(operation);
-    pricingMutationQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
-
   deps.ipcMain.handle("usage:summary", (_event, query: UsageQuery) =>
     tryResult(async () => {
       const result = await deps.client.queryUsage({
@@ -73,45 +58,6 @@ export function registerRuntimeHostUsageIpc(
           provenance: result.provenance,
         };
       }, "USAGE_LOGS_FAILED"),
-  );
-  deps.ipcMain.handle("usage:pricing:list", () =>
-    tryResult(async () => {
-      const snapshot = await deps.client.loadPricingSnapshot();
-      return snapshot.entries
-        .filter((entry) => entry.source === "custom")
-        .map((entry) => entry.pricing);
-    }, "USAGE_PRICING_LIST_FAILED"),
-  );
-  deps.ipcMain.handle("usage:pricing:put", (_event, pricing: unknown) =>
-    tryResult(
-      () =>
-        enqueuePricingMutation(async () => {
-          const normalized = normalizePricingConfig(pricing);
-          if (!normalized.ok) throw new Error(normalized.error);
-          await applyPricingMutation(deps.client, {
-            kind: "upsert",
-            pricing: normalized.value,
-          });
-          deps.sendToRenderer("usage:pricing:changed");
-          return normalized.value;
-        }),
-      "USAGE_PRICING_PUT_FAILED",
-    ),
-  );
-  deps.ipcMain.handle("usage:pricing:reset", (_event, modelKey: unknown) =>
-    tryResult(
-      () =>
-        enqueuePricingMutation(async () => {
-          const normalized = normalizePricingModelKey(modelKey);
-          if (!normalized.ok) throw new Error(normalized.error);
-          await applyPricingMutation(deps.client, {
-            kind: "delete",
-            modelKey: normalized.value,
-          });
-          deps.sendToRenderer("usage:pricing:changed");
-        }),
-      "USAGE_PRICING_RESET_FAILED",
-    ),
   );
 }
 
@@ -159,26 +105,6 @@ function toToolQuery(query: UsageQuery) {
     ...(query.toolName === undefined ? {} : { toolName: query.toolName }),
     ...(query.status === undefined ? {} : { status: query.status }),
   };
-}
-
-async function applyPricingMutation(
-  client: DesktopRuntimeHostClient,
-  mutation:
-    | { readonly kind: "upsert"; readonly pricing: PricingConfig }
-    | { readonly kind: "delete"; readonly modelKey: string },
-): Promise<void> {
-  const outcome = await client.applyPricingMutation({
-    base: await client.loadPricingSnapshot(),
-    mutation,
-  });
-  if (
-    outcome.kind === "saved" ||
-    outcome.kind === "saved_refresh_failed" ||
-    outcome.kind === "synchronized"
-  ) {
-    return;
-  }
-  throw new Error("Pricing changed concurrently; reload it before retrying");
 }
 
 function invalidUsageProjection(): Error {

@@ -13,6 +13,26 @@ export type UsageSettingsCopy = {
     noPricing: string; modelKind: string; toolKind: string; openSession(label: string): string; success: string; error: string;
     providerEmptyTitle: string; providerEmptyBody: string; modelEmptyTitle: string; modelEmptyBody: string;
     toolEmptyTitle: string; toolEmptyBody: string; pricingEmptyBody: string;
+    // Pricing editor (pricing.query / pricing.mutate narrow surface)
+    pricingRefreshAria: string; pricingLoadFailed: string; pricingSaveFailed: string; pricingDeleteFailed: string;
+    pricingConflict: string; pricingRateInvalid: string; pricingModelKeyLabel: string; pricingModelKeyPlaceholder: string;
+    pricingInputLabel: string; pricingInputShort: string; pricingInputPlaceholder: string;
+    pricingOutputLabel: string; pricingOutputShort: string; pricingOutputPlaceholder: string;
+    pricingCacheReadLabel: string; pricingCacheReadShort: string; pricingCacheReadPlaceholder: string;
+    pricingCacheWriteLabel: string; pricingCacheWriteShort: string; pricingCacheWritePlaceholder: string;
+    pricingSourceBuiltin: string; pricingSourceCustom: string;
+    pricingResetEffectRestore: string; pricingResetEffectUnpriced: string;
+    pricingResetButton: string; pricingResetConfirm: string; pricingResetSuccess: string;
+    pricingAddButton: string; pricingAddRow: string; pricingCancelButton: string;
+    pricingClickToSet: string; pricingRefreshButton: string; pricingModelKeyRequired: string;
+    // Display scope toggle:
+    //  - "已启用": models from currently-enabled connections that the user
+    //    has marked usable (whether or not they have a configured price).
+    //  - "全部": the union of every connection's full catalog (incl. disabled
+    //    connections and unenabled models), built-in-priced models, and saved
+    //    custom-priced models (including orphans whose connection was removed).
+    pricingScopeAria: string; pricingScopeEnabled: string;
+    pricingScopeAll: string; pricingScopeAllHelp: string;
   };
 };
 
@@ -35,6 +55,19 @@ const SETTINGS_USAGE_COPY = {
       modelEmptyTitle: '暂无模型用量', modelEmptyBody: '完成一次模型请求后，这里会按模型聚合请求数、Token 与费用。',
       toolEmptyTitle: '暂无工具调用', toolEmptyBody: '智能体调用工具后，这里会按工具聚合调用次数、成功、错误与平均耗时。',
       pricingEmptyBody: '未配置定价覆盖时，费用按内置模型定价表结算；在此可为特定模型登记自定义价格。',
+      pricingRefreshAria: '刷新定价配置', pricingLoadFailed: '加载定价配置失败', pricingSaveFailed: '保存定价失败', pricingDeleteFailed: '删除定价失败',
+      pricingConflict: '定价已被改动，已自动刷新，请重试', pricingRateInvalid: '价格必须为非负数字', pricingModelKeyLabel: '模型标识', pricingModelKeyPlaceholder: '如 openai:gpt-4o',
+      pricingInputLabel: '输入 / 1M (USD)', pricingInputShort: '输入', pricingInputPlaceholder: '如 5',
+      pricingOutputLabel: '输出 / 1M (USD)', pricingOutputShort: '输出', pricingOutputPlaceholder: '如 15',
+      pricingCacheReadLabel: '缓存读 / 1M (USD)', pricingCacheReadShort: '缓存读', pricingCacheReadPlaceholder: '可选',
+      pricingCacheWriteLabel: '缓存写 / 1M (USD)', pricingCacheWriteShort: '缓存写', pricingCacheWritePlaceholder: '可选',
+      pricingSourceBuiltin: '内置', pricingSourceCustom: '自定义',
+      pricingResetEffectRestore: '删除后恢复内置价格', pricingResetEffectUnpriced: '删除后变为无价',
+      pricingResetButton: '重置', pricingResetConfirm: '确定要删除该模型的自定义价格吗？', pricingResetSuccess: '已重置为内置价格',
+      pricingAddButton: '保存', pricingAddRow: '新增定价', pricingCancelButton: '取消',
+      pricingClickToSet: '点击设置', pricingRefreshButton: '刷新', pricingModelKeyRequired: '请输入模型标识',
+      pricingScopeAria: '显示范围', pricingScopeEnabled: '当前启用', pricingScopeAll: '全部',
+      pricingScopeAllHelp: '显示所有连接的全部模型（含已停用连接和未启用模型）。',
     },
   },
   en: {
@@ -55,6 +88,19 @@ const SETTINGS_USAGE_COPY = {
       modelEmptyTitle: 'No model usage', modelEmptyBody: 'After a model request, request counts, tokens, and costs appear here by model.',
       toolEmptyTitle: 'No tool calls', toolEmptyBody: 'After an agent calls a tool, calls, successes, errors, and average duration appear here by tool.',
       pricingEmptyBody: 'Without pricing overrides, costs use the built-in model pricing table. Add custom prices here for specific models.',
+      pricingRefreshAria: 'Refresh pricing', pricingLoadFailed: 'Failed to load pricing', pricingSaveFailed: 'Failed to save pricing', pricingDeleteFailed: 'Failed to delete pricing',
+      pricingConflict: 'Pricing changed concurrently — refreshed, please retry', pricingRateInvalid: 'Rates must be non-negative numbers', pricingModelKeyLabel: 'Model key', pricingModelKeyPlaceholder: 'e.g. openai:gpt-4o',
+      pricingInputLabel: 'Input / 1M (USD)', pricingInputShort: 'In', pricingInputPlaceholder: 'e.g. 5',
+      pricingOutputLabel: 'Output / 1M (USD)', pricingOutputShort: 'Out', pricingOutputPlaceholder: 'e.g. 15',
+      pricingCacheReadLabel: 'Cache Read / 1M (USD)', pricingCacheReadShort: 'C.Rd', pricingCacheReadPlaceholder: 'optional',
+      pricingCacheWriteLabel: 'Cache Write / 1M (USD)', pricingCacheWriteShort: 'C.Wr', pricingCacheWritePlaceholder: 'optional',
+      pricingSourceBuiltin: 'builtin', pricingSourceCustom: 'custom',
+      pricingResetEffectRestore: 'Resets to the built-in price', pricingResetEffectUnpriced: 'Becomes unpriced',
+      pricingResetButton: 'Reset', pricingResetConfirm: 'Delete the custom price for this model?', pricingResetSuccess: 'Reset to built-in price',
+      pricingAddButton: 'Save', pricingAddRow: 'Add pricing', pricingCancelButton: 'Cancel',
+      pricingClickToSet: 'Click to set', pricingRefreshButton: 'Refresh', pricingModelKeyRequired: 'Model key is required',
+      pricingScopeAria: 'Display scope', pricingScopeEnabled: 'Enabled only', pricingScopeAll: 'All',
+      pricingScopeAllHelp: "Show every connection's full model catalog (including disabled connections and unenabled models).",
     },
   },
 } satisfies UiCatalog<UsageSettingsCopy>;

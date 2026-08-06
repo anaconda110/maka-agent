@@ -104,6 +104,10 @@ import type {
   OnboardingMilestoneId,
   OnboardingState,
 } from '@maka/core';
+import type {
+  EffectivePricingEntry,
+  PricingMutation,
+} from '@maka/runtime-host/protocol';
 
 export interface OnboardingSnapshot {
   state: OnboardingState;
@@ -793,5 +797,19 @@ export interface MakaBridge {
     getState(sessionId: string): Promise<BrowserState | null>;
     onState(handler: (payload: { sessionId: string; state: BrowserState }) => void): () => void;
     onLive(handler: (payload: { sessionIds: string[] }) => void): () => void;
+  };
+  // Pricing narrow surface mirroring the Runtime Host protocol operations
+  // `pricing.query` / `pricing.mutate`. The renderer never touches the
+  // protocol layer directly; main runs the adapter (DesktopRuntimeHostClient)
+  // and only the snapshot + optimistic-lock token cross this boundary.
+  pricing: {
+    query(): Promise<{ revision: number; entries: EffectivePricingEntry[] }>;
+    mutate(input: {
+      expectedRevision: number;
+      mutation: PricingMutation;
+    }): Promise<
+      | { kind: 'committed' | 'unchanged'; revision: number }
+      | { kind: 'revision_conflict'; actualRevision: number }
+    >;
   };
 }

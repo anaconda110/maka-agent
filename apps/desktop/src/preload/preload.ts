@@ -119,6 +119,10 @@ import type {
   OnboardingMilestoneId,
   QuoteRef,
 } from '@maka/core';
+import type {
+  EffectivePricingEntry,
+  PricingMutation,
+} from '@maka/runtime-host/protocol';
 
 type LocalMemoryMutationResult =
   | { ok: true; state: LocalMemoryState; entry?: LocalMemoryEntryPreview; proposal?: LocalMemoryEntryPreview }
@@ -1202,6 +1206,28 @@ const makaBridge = {
       | { ok: false; reason: 'invalid_id' | 'missing' | 'blocked_path' | 'not_file' | 'not_directory' | 'open_failed' }
     > {
       return ipcRenderer.invoke('skills:open', id, target);
+    },
+  },
+  // Pricing narrow surface — mirrors Runtime Host `pricing.query` /
+  // `pricing.mutate`. Main runs the adapter; only the snapshot + optimistic
+  // revision cross this boundary. No subscribe channel: the renderer refreshes
+  // on demand (manual reload / post-mutation re-query).
+  pricing: {
+    async query(): Promise<{ revision: number; entries: EffectivePricingEntry[] }> {
+      const result = await ipcRenderer.invoke('pricing:query');
+      if (result && result.ok) return result.data;
+      throw new Error(result?.error?.message ?? 'Failed to load pricing');
+    },
+    async mutate(input: {
+      expectedRevision: number;
+      mutation: PricingMutation;
+    }): Promise<
+      | { kind: 'committed' | 'unchanged'; revision: number }
+      | { kind: 'revision_conflict'; actualRevision: number }
+    > {
+      const result = await ipcRenderer.invoke('pricing:mutate', input);
+      if (result && result.ok) return result.data;
+      throw new Error(result?.error?.message ?? 'Failed to mutate pricing');
     },
   },
   // Embedded browser (P3). The native WebContentsView floats above the DOM; the

@@ -76,6 +76,7 @@ import {
   createSettingsStore,
   createMcpConfigStore,
   createSqliteModelCallLedger,
+  createSqlitePricingStore,
   createSqliteTelemetryRepo,
   resetIncompatibleOperationalStateDatabase,
 } from '@maka/storage';
@@ -122,6 +123,8 @@ import type { NewSessionSkillContext } from './workspace-resources-ipc-main.js';
 import { registerDailyReviewIpc } from './daily-review-ipc-main.js';
 import { registerInspectorIpc } from './inspector-ipc-main.js';
 import { registerUsageIpc } from './usage-ipc-main.js';
+import { createEmbeddedPricingPort } from './embedded-pricing-port.js';
+import { registerPricingIpc } from './pricing-ipc-main.js';
 import { registerWebSearchIpc } from './web-search-ipc-main.js';
 import { registerNotificationsIpc } from './notifications-ipc-main.js';
 import { registerAppIpc } from './app-ipc-main.js';
@@ -1300,6 +1303,12 @@ function registerIpc(): void {
     refreshPricingLookup: () => {
       lookupPricing = buildPricingLookup(telemetryRepo.listPricingOverrides());
     },
+    sendToRenderer: safeSendToRenderer,
+  });
+  const pricingStore = createSqlitePricingStore(workspaceRoot);
+  registerPricingIpc({
+    ipcMain,
+    port: createEmbeddedPricingPort(pricingStore),
     sendToRenderer: safeSendToRenderer,
   });
 }

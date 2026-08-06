@@ -27,16 +27,16 @@ function extractChannels(source: string, pattern: RegExp): Set<string> {
 }
 
 // Channels deliberately registered in main with no preload consumer.
-// usage:* is the #1596 Usage/Pricing authority surface: per the #1982
-// decision it stays main-side until the #2010 M4 client adapter exposes a
-// narrow renderer interface (pricing.query / pricing.mutate).
+// usage:summary/buckets/logs are the #1596 Usage authority surface: per the
+// #1982 decision they stay main-side (no direct renderer consumer).
+// Pricing is exposed to the renderer via the #2010 narrow interface
+// `pricing:query` / `pricing:mutate` (see pricing-ipc-main.ts), backed by
+// either the Runtime Host adapter or the local SQLite pricing store; the
+// old `usage:pricing:*` channels have been removed.
 const MAIN_ONLY_CHANNELS = [
   'usage:summary',
   'usage:buckets',
   'usage:logs',
-  'usage:pricing:list',
-  'usage:pricing:put',
-  'usage:pricing:reset',
 ];
 
 describe('IPC surface contract', () => {

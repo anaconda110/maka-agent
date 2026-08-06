@@ -90,64 +90,6 @@ describe("Runtime Host Usage IPC", () => {
       limit: 100,
     });
   });
-
-  test("serializes Pricing changes against fresh Host snapshots", async () => {
-    const handlers = new Map<string, Handler>();
-    const mutations: Array<Record<string, unknown>> = [];
-    const events: string[] = [];
-    let revision = 1;
-    const client = {
-      async queryUsage() {
-        throw new Error("not used");
-      },
-      async loadPricingSnapshot() {
-        return {
-          hostEpoch: "epoch",
-          connectionId: "connection",
-          revision,
-          entries:
-            revision === 1
-              ? []
-              : [
-                  {
-                    source: "custom",
-                    resetEffect: "become_unpriced",
-                    pricing: {
-                      modelKey: "provider:model",
-                      inputUsdPer1M: 1,
-                      outputUsdPer1M: 2,
-                    },
-                  },
-                ],
-        };
-      },
-      async applyPricingMutation(input: Record<string, unknown>) {
-        mutations.push(input);
-        revision += 1;
-        return {
-          kind: "saved_refresh_failed",
-          disposition: "committed",
-        };
-      },
-    };
-    register(handlers, client, events);
-
-    const put = handlers.get("usage:pricing:put")?.({}, {
-      modelKey: "provider:model",
-      inputUsdPer1M: 1,
-      outputUsdPer1M: 2,
-    });
-    const reset = handlers.get("usage:pricing:reset")?.({}, "provider:model");
-    assert.equal((await put as { ok: boolean }).ok, true);
-    assert.equal((await reset as { ok: boolean }).ok, true);
-    assert.equal(mutations.length, 2);
-    assert.equal((mutations[0]!.base as { revision: number }).revision, 1);
-    assert.equal((mutations[1]!.base as { revision: number }).revision, 2);
-    assert.deepEqual(events, [
-      "usage:pricing:changed",
-      "usage:pricing:changed",
-    ]);
-  });
 });
 
 function register(
