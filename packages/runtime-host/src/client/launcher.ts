@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { dirname, isAbsolute } from 'node:path';
+import * as fs from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export interface DetachedCandidateInput {
@@ -78,11 +79,16 @@ function spawnCandidate(input: DetachedCandidateInput, detached: boolean) {
   appendArgument(args, '--handshake-timeout-ms', input.handshakeTimeoutMs);
   appendArgument(args, '--generation', input.generation);
 
+  // Optional diagnostic logging for the candidate process. When a host fails
+  // to become ready, setting MAKA_HOST_LOG_DIR makes the candidate stderr
+  // available for inspection instead of being swallowed.
+  const stdio = process.env.MAKA_HOST_LOG_DIR ? 'pipe' : 'ignore';
+
   // spawn() commits the side effect synchronously; spawned only reports that commit's outcome.
   const child = spawn(executable, args, {
     cwd: dirname(isAbsolute(executable) ? executable : process.execPath),
     detached,
-    stdio: 'ignore',
+    stdio,
     windowsHide: true,
     env: {
       ...process.env,
@@ -90,7 +96,18 @@ function spawnCandidate(input: DetachedCandidateInput, detached: boolean) {
       ...input.env,
     },
   });
+  if (child.stderr && process.env.MAKA_HOST_LOG_DIR) {
+    child.stderr.pipe(openDiagnosticLog());
+  }
   return child;
+}
+
+function openDiagnosticLog(): fs.WriteStream {
+  const dir = process.env.MAKA_HOST_LOG_DIR;
+  if (!dir) throw new Error('MAKA_HOST_LOG_DIR must be set for diagnostic logging');
+  fs.mkdirSync(dir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return fs.createWriteStream(join(dir, `maka-host-candidate-${process.pid}-${timestamp}.log`), { flags: 'a' });
 }
 
 function spawnedPid(child: ReturnType<typeof spawn>): Promise<DetachedCandidateAttempt> {
