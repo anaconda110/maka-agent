@@ -1279,9 +1279,14 @@ export async function createExecutionRuntimeHostComposition(
               ),
             );
             await sessionRevisions.recover();
-            for (const session of recoverySessions) {
-              await stores.runtimeEventStore.repairImmutableSteeringMessageProofsForRecovery(
-                session.id,
+            // Bounded parallel repair so recovery completes on large workspaces.
+            const REPAIR_BATCH_SIZE = 8;
+            for (let i = 0; i < recoverySessions.length; i += REPAIR_BATCH_SIZE) {
+              const batch = recoverySessions.slice(i, i + REPAIR_BATCH_SIZE);
+              await Promise.all(
+                batch.map((session) =>
+                  stores.runtimeEventStore.repairImmutableSteeringMessageProofsForRecovery(session.id),
+                ),
               );
             }
           },
