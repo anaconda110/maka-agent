@@ -158,7 +158,13 @@ class GitWorktreeChildExecutor implements SubagentWorktreeExecutor {
       await this.retireOrphan(path, entry.name);
     }
     if (liveByPath.size > 0) {
-      throw new Error(`Live subagent worktree is unavailable: ${liveByPath.keys().next().value}`);
+      // Crash recovery: bindings whose directories are gone are orphaned.
+      // Do not fail the whole Runtime Host startup; warn and skip so the
+      // session coordinator can clean up the stale metadata.
+      for (const path of liveByPath.keys()) {
+        console.warn(`[subagent-worktree] skipping orphaned live binding with missing directory: ${path}`);
+      }
+      liveByPath.clear();
     }
   }
 
