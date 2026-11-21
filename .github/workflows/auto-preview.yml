@@ -6,33 +6,25 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
-  workflows: write
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Rebuild rust-preview as upstream + fork patches
+          fetch-depth: 0
+      - name: Merge upstream rust-preview into automation
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git init work
-          cd work
           git config user.name "maka-fork-automation"
           git config user.email "anaconda110@users.noreply.github.com"
           git remote add upstream https://github.com/apache/maka.git
           git fetch --no-tags upstream rust-preview
-          git checkout -B work FETCH_HEAD
-          ls ../fork-patches/*.patch
-          git apply --whitespace=nowarn ../fork-patches/*.patch
-          git add -A
-          git commit -m "fork build patches: release classifier (.m/README whitelist + audit fixtures)"
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" work:rust-preview
+          git merge --no-edit upstream/rust-preview
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation
   trigger:
     needs: [sync]
     runs-on: ubuntu-latest
@@ -40,7 +32,7 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Dispatch npm-publication on patched rust-preview
+      - name: Dispatch fork build on automation ref
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run npm-publication.yml -R ${{ github.repository }} -r rust-preview -f publish=false
+        run: gh workflow run build-rust-preview.yml -R ${{ github.repository }} -r automation -f publish=false

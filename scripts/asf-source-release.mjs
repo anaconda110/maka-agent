@@ -90,6 +90,7 @@ const textSourceExtensions = new Set([
   '.jsonc',
   '.jsonl',
   '.lock',
+  '.m',
   '.md',
   '.mjs',
   '.modulemap',
@@ -120,6 +121,7 @@ const textSourceExtensions = new Set([
 ]);
 const textSourceBasenames = new Set([
   'justfile',
+  'README',
   'THIRD_PARTY_NOTICES',
   'localhost.key',
   '.git-blame-ignore-revs',
