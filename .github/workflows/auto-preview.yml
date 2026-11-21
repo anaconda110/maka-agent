@@ -1,0 +1,28 @@
+name: Auto rust preview
+on:
+  schedule:
+    # UTC 01:00 = 北京时间 09:00,每天自动同步上游并重建
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fast-forward fork rust-preview to apache/maka
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST repos/${{ github.repository }}/merge-upstream -F branch=rust-preview
+  trigger:
+    needs: [sync]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch npm-publication on synced rust-preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run npm-publication.yml -R ${{ github.repository }} -r rust-preview -f publish=false
