@@ -1,0 +1,57 @@
+name: Build rust desktop (fork)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+          check-latest: true
+      - run: rustup update stable --no-self-update
+      - run: npm install --global --ignore-scripts --no-audit --no-fund npm@latest
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68
+        with:
+          tool: just
+      - name: Use short TEMP to avoid MAX_PATH failures in V8 source build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'C:\m' | Out-Null
+          Add-Content $env:GITHUB_ENV "TEMP=C:\m"
+          Add-Content $env:GITHUB_ENV "TMP=C:\m"
+      - name: Identify the V8 build inputs
+        id: v8key
+        shell: bash
+        run: echo "key=$(node scripts/rust/build-v8.mjs --cache-key)" >> "$GITHUB_OUTPUT"
+      - name: Restore V8 build cache
+        id: v8cache
+        uses: actions/cache/restore@v6
+        with:
+          path: target/v8/${{ steps.v8key.outputs.key }}
+          key: maka-v8-win32-x64-${{ steps.v8key.outputs.key }}
+      - name: Build desktop shell (just setup && just build --release)
+        env:
+          V8_CACHE_KEY: ${{ steps.v8key.outputs.key }}
+        shell: bash
+        run: just setup && just build --release
+      - name: Save V8 build cache
+        if: ${{ !cancelled() && steps.v8cache.outputs.cache-hit != 'true' && hashFiles(format('target/v8/{0}/receipt.json', steps.v8key.outputs.key)) != '' }}
+        uses: actions/cache/save@v6
+        with:
+          path: target/v8/${{ steps.v8key.outputs.key }}
+          key: maka-v8-win32-x64-${{ steps.v8key.outputs.key }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-shell-win32-x64
+          path: target/release/maka*.exe
+          if-no-files-found: error
