@@ -32,7 +32,7 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Dispatch fork build on automation ref
+      - name: Dispatch fork desktop build on automation ref
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run build-rust-preview.yml -R ${{ github.repository }} -r automation -f publish=false
+        run: gh workflow run build-rust-desktop.yml -R ${{ github.repository }} -r automation

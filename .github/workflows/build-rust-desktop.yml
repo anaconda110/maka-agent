@@ -2,7 +2,7 @@ name: Build rust desktop (fork)
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   desktop:
     runs-on: windows-latest
@@ -55,3 +55,31 @@ jobs:
           name: desktop-shell-win32-x64
           path: target/release/maka*.exe
           if-no-files-found: error
+      - name: Publish daily release (unofficial third-party build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          DATE=$(date +%Y%m%d)
+          SHA=$(git rev-parse --short HEAD)
+          TAG="rust-desktop-v${VERSION}-${DATE}-${SHA}"
+          cd target/release
+          sha256sum maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe > SHA256SUMS.txt
+          cat > release-notes.md <<'NOTES'
+          # Unofficial Rust preview desktop build (third-party)
+
+          **Not an Apache release.** Independent, experimental third-party distribution — not approved, endorsed, or supported by the Apache Software Foundation (ASF). Apache Maka is an effort undergoing incubation at the ASF.
+
+          非官方第三方构建（fork 每日自动化产出）：与 Apache 软件基金会（ASF）无关，未经 ASF 批准、背书或支持。Apache Maka 为 ASF 孵化中项目。
+
+          - Source: apache/maka@rust-preview (commit in tag name); fork build patches documented on the automation branch
+          - License: Apache-2.0; upstream DISCLAIMER included in packages. Use at your own risk.
+          - Known desktop issue: closing the window exits the process, no tray (upstream #6668).
+          - Install: extract and run `maka-desktop-shell.exe`; terminal agent is `maka.exe`. Verify hashes against SHA256SUMS.txt.
+          NOTES
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe SHA256SUMS.txt -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe SHA256SUMS.txt -R "$GITHUB_REPOSITORY" --title "Rust preview desktop v${VERSION} (${DATE})" --notes-file release-notes.md
+          fi
