@@ -1,11 +1,32 @@
 name: Build rust desktop (fork)
+run-name: Fork rust preview build (${{ github.ref_name }})
 on:
   workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  desktop:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            artifact: desktop-shell-win32-x64
+            paths: |
+              target/release/maka*.exe
+          - os: ubuntu-latest
+            target: linux-x64-gnu
+            artifact: desktop-shell-linux-x64-gnu
+            paths: |
+              bundle/maka-rust-linux-x64-gnu.tar.gz
+          - os: macos-latest
+            target: darwin-arm64
+            artifact: desktop-shell-darwin-arm64
+            paths: |
+              bundle/Maka.app.zip
+              bundle/maka-rust-darwin-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
@@ -22,8 +43,29 @@ jobs:
       - run: npm install --global --ignore-scripts --no-audit --no-fund npm@latest
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68
         with:
-          tool: just
-      - name: Use short TEMP to avoid MAX_PATH failures in V8 source build
+          tool: just,cargo-binstall
+      - name: Install cargo-binstall (self, latest)
+        if: runner.os == 'Linux'
+        run: cargo binstall --no-confirm --force cargo-binstall
+      - name: Install the Linux baseline linker and zig
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: latest
+      - name: Install cargo-zigbuild
+        if: runner.os == 'Linux'
+        run: cargo binstall --no-confirm --force cargo-zigbuild
+      - name: Install native build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libx11-dev libxi-dev libxtst-dev libxext-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libglib2.0-dev libclang-dev llvm-dev
+          echo "LIBCLANG_PATH=$(/usr/bin/llvm-config --libdir)" >> "$GITHUB_ENV"
+      - name: Select libclang on macOS
+        if: runner.os == 'macOS'
+        run: echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+      - name: Use short TEMP on Windows to avoid MAX_PATH failures in V8 source build
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path 'C:\m' | Out-Null
@@ -38,7 +80,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: target/v8/${{ steps.v8key.outputs.key }}
-          key: maka-v8-win32-x64-${{ steps.v8key.outputs.key }}
+          key: maka-v8-${{ matrix.target }}-${{ steps.v8key.outputs.key }}
       - name: Build desktop shell (just setup && just build --release)
         env:
           V8_CACHE_KEY: ${{ steps.v8key.outputs.key }}
@@ -49,37 +91,71 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: target/v8/${{ steps.v8key.outputs.key }}
-          key: maka-v8-win32-x64-${{ steps.v8key.outputs.key }}
+          key: maka-v8-${{ matrix.target }}-${{ steps.v8key.outputs.key }}
+      - name: Bundle (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p bundle/maka-rust-linux-x64-gnu
+          for f in maka maka-service maka-desktop-shell maka-python-worker; do
+            [ -f "target/release/$f" ] && cp "target/release/$f" bundle/maka-rust-linux-x64-gnu/
+          done
+          tar -czf bundle/maka-rust-linux-x64-gnu.tar.gz -C bundle maka-rust-linux-x64-gnu
+      - name: Bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p bundle
+          if [ -d target/release/Maka.app ]; then (cd target/release && zip -qry ../bundle/Maka.app.zip Maka.app); fi
+          mkdir -p bundle/maka-rust-darwin-arm64
+          for f in maka maka-service maka-desktop-shell maka-python-worker; do
+            [ -f "target/release/$f" ] && cp "target/release/$f" bundle/maka-rust-darwin-arm64/
+          done
+          tar -czf bundle/maka-rust-darwin-arm64.tar.gz -C bundle maka-rust-darwin-arm64
       - uses: actions/upload-artifact@v7
         with:
-          name: desktop-shell-win32-x64
-          path: target/release/maka*.exe
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
           if-no-files-found: error
+
+  publish:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-shell-*
+          path: dist
       - name: Publish daily release (unofficial third-party build)
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
+          set -e
           VERSION=$(node -p "require('./package.json').version")
           DATE=$(date +%Y%m%d)
           SHA=$(git rev-parse --short HEAD)
           TAG="rust-desktop-v${VERSION}-${DATE}-${SHA}"
-          cd target/release
-          sha256sum maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe > SHA256SUMS.txt
+          mkdir -p out
+          find dist -type f -exec cp {} out/ \;
+          ls -la out/
+          (cd out && sha256sum * > SHA256SUMS.txt)
           cat > release-notes.md <<'NOTES'
-          # Unofficial Rust preview desktop build (third-party)
+          # Unofficial Rust preview build (third-party, multi-platform)
 
           **Not an Apache release.** Independent, experimental third-party distribution — not approved, endorsed, or supported by the Apache Software Foundation (ASF). Apache Maka is an effort undergoing incubation at the ASF.
 
           非官方第三方构建（fork 每日自动化产出）：与 Apache 软件基金会（ASF）无关，未经 ASF 批准、背书或支持。Apache Maka 为 ASF 孵化中项目。
 
           - Source: apache/maka@rust-preview (commit in tag name); fork build patches documented on the automation branch
-          - License: Apache-2.0; upstream DISCLAIMER included in packages. Use at your own risk.
+          - Assets: Windows loose exes; Linux tar.gz (binaries); macOS Maka.app.zip + CLI tar.gz. SHA256SUMS.txt covers all files.
+          - License: Apache-2.0. Use at your own risk.
           - Known desktop issue: closing the window exits the process, no tray (upstream #6668).
-          - Install: extract and run `maka-desktop-shell.exe`; terminal agent is `maka.exe`. Verify hashes against SHA256SUMS.txt.
+          - Platforms present depend on the day's build results.
           NOTES
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe SHA256SUMS.txt -R "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$TAG" maka-desktop-shell.exe maka.exe maka-service.exe maka-python-worker.exe SHA256SUMS.txt -R "$GITHUB_REPOSITORY" --title "Rust preview desktop v${VERSION} (${DATE})" --notes-file release-notes.md
+            gh release delete "$TAG" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag
           fi
+          gh release create "$TAG" out/* release-notes.md -R "$GITHUB_REPOSITORY" --title "Rust preview v${VERSION} (${DATE})" --notes-file release-notes.md
