@@ -25,8 +25,8 @@ jobs:
           git remote add upstream https://github.com/apache/maka.git
           git fetch --no-tags upstream rust-preview
           git checkout -B work FETCH_HEAD
-          ls ../patches/*.patch
-          git apply --whitespace=nowarn ../patches/*.patch
+          ls ../fork-patches/*.patch
+          git apply --whitespace=nowarn ../fork-patches/*.patch
           git add -A
           git commit -m "fork build patches: release classifier (.m/README whitelist + audit fixtures)"
           git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" work:rust-preview
