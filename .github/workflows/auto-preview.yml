@@ -9,12 +9,27 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Fast-forward fork rust-preview to apache/maka
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Rebuild rust-preview as upstream + fork patches
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X POST repos/${{ github.repository }}/merge-upstream -F branch=rust-preview
+        run: |
+          git init work
+          cd work
+          git config user.name "maka-fork-automation"
+          git config user.email "anaconda110@users.noreply.github.com"
+          git remote add upstream https://github.com/apache/maka.git
+          git fetch --no-tags upstream rust-preview
+          git checkout -B work FETCH_HEAD
+          ls ../patches/*.patch
+          git apply --whitespace=nowarn ../patches/*.patch
+          git add -A
+          git commit -m "fork build patches: release classifier (.m/README whitelist + audit fixtures)"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" work:rust-preview
   trigger:
     needs: [sync]
     runs-on: ubuntu-latest
@@ -22,7 +37,7 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Dispatch npm-publication on synced rust-preview
+      - name: Dispatch npm-publication on patched rust-preview
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run npm-publication.yml -R ${{ github.repository }} -r rust-preview -f publish=false
