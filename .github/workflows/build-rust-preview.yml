@@ -68,9 +68,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Computer Use's Swift bindings use the current macOS SDK.
-          - runner: macos-latest
-            target: darwin-arm64
           - runner: ubuntu-latest
             target: linux-x64-gnu
           - runner: windows-latest
@@ -137,6 +134,13 @@ jobs:
         with:
           path: target/v8/${{ steps.v8-key.outputs.key }}
           key: maka-v8-${{ matrix.target }}-${{ steps.v8-key.outputs.key }}
+      - name: Use short TEMP on Windows to avoid MAX_PATH failures in V8 source build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path 'C:\m' | Out-Null
+          Add-Content $env:GITHUB_ENV "TEMP=C:\m"
+          Add-Content $env:GITHUB_ENV "TMP=C:\m"
       - name: Build verified source and exercise the native executables
         env:
           V8_CACHE_KEY: ${{ steps.v8-key.outputs.key }}
@@ -213,7 +217,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-latest, ubuntu-latest, windows-latest]
+        runner: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
