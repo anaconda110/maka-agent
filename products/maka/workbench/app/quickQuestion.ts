@@ -17,10 +17,10 @@
  * under the License.
  */
 
-import { cleanup, signal } from 'nsh';
+import { cleanup, signal, Storage } from 'nsh';
 import { randomUUID } from 'crypto';
 import { host } from 'maka/host';
-import type { OperationReply } from '../../../../packages/plugin-sdk/src/index';
+import type { AgentHistoryChunk, OperationReply } from '../../../../packages/plugin-sdk/src/index';
 import type { OriginalMutation } from './host';
 import { tr } from './locale';
 
@@ -28,7 +28,7 @@ function returned(reply: OperationReply) {
   const receipt = reply.receipt;
   const outcome = receipt.kind === 'recorded' ? receipt.outcome : receipt;
   const failure = outcome.kind === 'returned' ? outcome.result : outcome;
-  if (failure.kind === 'success') return;
+  if (failure.kind === 'success') return failure.value as AgentHistoryChunk['replyInfo'];
   if ('diagnostic' in failure) {
     throw Error(
       failure.diagnostic === 'quick_question_model_required'
@@ -39,70 +39,108 @@ function returned(reply: OperationReply) {
   throw Error(tr('Quick question failed.'));
 }
 
+export interface QuickThread {
+  id: string;
+  turns: {
+    question: string;
+    answer: string;
+    askedAt?: number;
+    answeredAt?: number;
+    replyInfo?: AgentHistoryChunk['replyInfo'];
+  }[];
+  updatedAt: number;
+}
+
 export function createQuickQuestion(openBot: () => Promise<string>) {
-  const turns = signal<{ question: string; answer: string }[]>([]);
-  const running = signal(false),
-    error = signal('');
-  let previous: string | null = null;
+  const thread = signal<QuickThread | null>(null);
+  const running = signal(false);
+  const error = signal('');
   let active: OriginalMutation | undefined;
-  let stopped = false,
-    alive = true;
+  let stopped = false;
+  let scope = '';
+  const prefix = async () => 'maka.quick-history.' + (await openBot()) + '.';
+  const save = (value: QuickThread) => Storage.setItem(scope + value.id, JSON.stringify(value));
+  const list = async (): Promise<QuickThread[]> => {
+    const root = await prefix();
+    const keys = (await Storage.keys()).filter((key) => key.startsWith(root));
+    const values = await Promise.all(keys.map((key) => Storage.getItem(key)));
+    return values.flatMap((value) => (value ? [JSON.parse(value) as QuickThread] : []));
+  };
   const stop = () => {
     stopped = true;
     active?.cancel();
   };
-  cleanup(() => {
-    alive = false;
-    stop();
-  });
-  const ask = async (question: string, follow: boolean) => {
-    question = question.trim();
+  cleanup(stop);
+  const ask = async (text: string, existing: QuickThread | null) => {
+    const question = text.trim();
     if (!question || running()) return;
-    const requestId = randomUUID();
-    const continueFrom = follow ? previous : null;
-    const history = continueFrom ? turns() : [];
-    running.set(true);
+    const previous = existing?.turns ?? [];
+    if (previous.length >= 32) {
+      error.set(tr('Continue in the main window to keep chatting.'));
+      return;
+    }
     error.set('');
+    scope = '';
+    running.set(true);
     stopped = false;
-    previous = null;
-    turns.set([...history, { question, answer: '' }]);
+    const askedAt = Date.now();
+    let value: QuickThread = {
+      id: existing?.id ?? randomUUID(),
+      updatedAt: askedAt,
+      turns: [...previous, { question, askedAt, answer: '' }],
+    };
+    thread.set(value);
     try {
       const sessionId = await openBot();
+      scope = 'maka.quick-history.' + sessionId + '.';
+      await save(value);
       if (stopped) return;
-      const operation = (await host.beginMutation('agent', 'askQuickQuestion', {
+      active = (await host.beginMutation('agent', 'askQuickQuestion', {
         sessionId,
         question,
-        requestId,
-        continueFrom,
+        requestId: randomUUID(),
+        history: previous.map(({ question, answer }) => ({ question, answer })),
       })) as OriginalMutation;
-      active = operation;
-      if (stopped) operation.cancel();
+      if (stopped) active.cancel();
       for (;;) {
-        const event = await operation.next();
+        const event = await active.next();
         if (!event || event.kind === 'not_dispatched') throw Error(tr('Quick question failed.'));
-        if (event.kind === 'progress' && alive && typeof event.value === 'string') {
-          previous = requestId;
-          turns.set([...history, { question, answer: event.value }]);
+        if (event.kind === 'progress' && typeof event.value === 'string') {
+          value = { ...value, turns: [...previous, { question, askedAt, answer: event.value }] };
+          thread.set(value);
         }
         if (event.kind === 'finished') {
-          returned(event.reply);
+          const replyInfo = returned(event.reply);
+          value = {
+            ...value,
+            turns: [...previous, { ...value.turns.at(-1)!, answeredAt: Date.now(), replyInfo }],
+          };
+          thread.set(value);
           if (event.cleanupError) throw Error(event.cleanupError);
           break;
         }
       }
     } catch (cause) {
-      if (alive && !stopped) error.set(String(cause));
+      if (!stopped) error.set(String(cause));
     } finally {
+      try {
+        if (scope) await save(value);
+      } catch (cause) {
+        error.set(String(cause));
+      }
       active = undefined;
-      if (alive) running.set(false);
+      running.set(false);
     }
   };
-  const reset = () => {
-    if (!running()) {
-      turns.set([]);
-      previous = null;
-      error.set('');
-    }
+  return {
+    thread,
+    running,
+    error,
+    ask,
+    stop,
+    list,
+    async remove(id: string) {
+      await Storage.removeItem((await prefix()) + id);
+    },
   };
-  return { turns, running, error, ask, stop, reset };
 }

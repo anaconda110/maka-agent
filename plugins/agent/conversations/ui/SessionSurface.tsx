@@ -149,7 +149,10 @@ import {
 import {
   browserOrder,
   groupConversations,
+  groupConversationsByTime,
 } from '../../../../products/maka/workbench/app/conversationGroups';
+import { workspaceSessions } from '../../../../products/maka/workbench/app/sessionNesting';
+import { sidebarPreferences } from '../../../../products/maka/workbench/app/sidebarPreferences';
 import {
   WorkspaceBrowser,
   type WorkspaceBrowserProps,
@@ -1291,6 +1294,8 @@ export function createConversationUi(
       },
     };
   });
+  const usageComposer = () =>
+    composerSession() ?? (selected() === null && pendingWorkspace() ? pendingComposer() : null);
   cleanup(() => {
     prefills.clear();
   });
@@ -1560,7 +1565,7 @@ export function createConversationUi(
         await pendingDefaultRead;
         requireOwner();
         const backend = pendingBackend();
-        if (backend?.kind !== 'model') throw new UiError('This action requires a native model.');
+        if (!backend) throw new UiError('Choose a model.');
         await pendingModel.refreshModel();
         requireOwner();
         const model = pendingModelDetails();
@@ -1632,8 +1637,7 @@ export function createConversationUi(
                 boundaryRevision: observed.boundaryRevision,
                 binding: observed.binding,
               },
-              model: nativeModelSelection(backend),
-              thinkingLevel: backend.thinkingLevel ?? null,
+              backend,
             },
           });
           if (created.kind === 'conflict')
@@ -1968,16 +1972,26 @@ export function createConversationUi(
     const current = overlay();
     if (switching() || busy() || (current && current.kind !== 'sessions')) return;
     const bot = botSession() ?? null;
+    const visible = workspaceSessions(
+      browsing.sessions(),
+      bot,
+      browsing.filter(),
+      platform.idiom !== 'terminal',
+    );
+    const byTime =
+      platform.idiom !== 'terminal' &&
+      browsing.filter() === 'all' &&
+      sidebarPreferences.sortMode() === 'time';
     const rows = browserOrder(
-      groupConversations(
-        browsing.sessions().filter((session) => session.id !== bot),
-        browsing.projects(),
-        false,
-      ),
+      byTime
+        ? groupConversationsByTime(visible)
+        : groupConversations(visible, browsing.projects(), false),
       collapsedGroups(),
       selected(),
       platform.idiom === 'terminal' ? undefined : expandedProjects(),
-      platform.idiom === 'terminal' || browsing.filter() !== 'all' ? undefined : foldedFamilies(),
+      platform.idiom === 'terminal' || browsing.filter() !== 'all' || byTime
+        ? undefined
+        : foldedFamilies(),
     );
     const index = rows.indexOf(selected() ?? '');
     const next = rows[index === -1 ? 0 : index + step];
@@ -2322,9 +2336,11 @@ export function createConversationUi(
       return (
         <WorkspaceBrowser
           {...browserProps}
+          openRooms={input.openRooms}
           navigationMore={input.navigationMore}
           pinSidebar={input.pinSidebar}
           suppressSidebarHover={input.suppressSidebarHover}
+          holdSidebarHover={input.holdSidebarHover}
         />
       );
     },
@@ -2900,31 +2916,14 @@ export function createConversationUi(
                   id: 'workspace',
                   sessionId: selected(),
                 })}
-                openFiles={
-                  selected() !== null && workspace()
-                    ? inputAction(invokeCommand, {
-                        id: 'files',
-                        sessionId: selected(),
-                      })
-                    : undefined
-                }
-                filesOpener={
-                  selected() !== null
-                    ? (node) => {
-                        const sid = selected();
-                        if (sid) resources.attachOpener(sid, node);
-                      }
-                    : undefined
-                }
                 usageLimits={
                   platform.idiom === 'terminal' ? undefined : (
                     <ComposerUsageLimits
-                      backend={() =>
-                        composerSession()?.backend() ??
-                        (selected() === null && pendingWorkspace()
-                          ? pendingComposer().backend()
-                          : null)
-                      }
+                      backend={() => usageComposer()?.backend() ?? null}
+                      model={() => {
+                        const details = usageComposer()?.modelDetails();
+                        return details?.kind === 'ready' ? details.choice.label : null;
+                      }}
                     />
                   )
                 }

@@ -39,9 +39,18 @@ import {
   type Signal,
 } from 'nsh';
 import { Button, Input, Menu, MenuItem, MenuSeparator } from 'nsh/base';
-import { createQuickQuestion } from './quickQuestion';
-import { quickQuestionIcon } from './quick-question-icon';
+import type {
+  AgentCreated,
+  AgentSession,
+  AgentSessionPosition,
+} from '../../../../packages/plugin-sdk/src/index.js';
+import { roomResult } from './roomMessage';
+import { createQuickQuestion, type QuickThread } from './quickQuestion';
+import { inputEditor } from './ComposerEditor';
+import { attachDictation } from './InlineDictation';
+import { dictationPreferences } from './dictationPreferences';
 import { QuickQuestionPanel } from './QuickQuestionPanel';
+import type { ConversationLauncher } from '../../../../plugins/agent/conversations/ui/QuickConversations';
 import { rememberInput, historyAtSelection } from './quick-input-history';
 import { GlobalShortcut, Window, currentWindow } from 'nsh/desktop';
 import type { UiContributionRef } from '../../../../packages/plugin-sdk/src/workbench.js';
@@ -54,7 +63,7 @@ import {
 } from '../../../../packages/plugin-sdk/src/workbench-views.js';
 import { matchOf } from '../../../../plugins/shared/quick-search';
 import { Icon } from './Icon';
-import { loadDraft, saveDraft, type Output } from './host';
+import { HostProvider, createHost, uiHost, loadDraft, saveDraft, type Output } from './host';
 import { hasComposerContent } from '../../../../packages/plugin-sdk/src/composer-view.js';
 import {
   MakaMark,
@@ -72,7 +81,14 @@ import { SettingsEditor } from './SettingsField';
 import { SettingsButton } from './SettingsPage';
 import { toolStoragePath, type ToolEntry } from './QuickCommands';
 import { entryMatch } from './quick-commands';
-import { createToolNavigation, QuickToolSettings, type QuickTools } from './QuickTools';
+import {
+  conversationTool,
+  dictationTool,
+  quickPluginName,
+  createToolNavigation,
+  QuickToolSettings,
+  type QuickTools,
+} from './QuickTools';
 import {
   isFrequent,
   parseUsage,
@@ -101,8 +117,6 @@ const MAX_LIST_HEIGHT = 360;
 const SETTINGS_HEIGHT = 440;
 const USAGE_KEY = 'maka.quick-launcher.usage';
 
-type BotOutbox = Output<'agent', 'botOutbox'>;
-
 type ToolScope = {
   entry: ToolEntry;
   previous: { query: string; selection: number };
@@ -124,43 +138,6 @@ const frameStyle = () =>
     borderColor: C.line,
     overflow: 'hidden',
   }) as const;
-
-const clock = (at: number) => {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-};
-
-/** The Bot's newest unread message, for as long as the launcher shows. */
-function watchUnread(fail: (reason: unknown) => void) {
-  const unread = signal<{ preview: string; at: number } | null>(null);
-  let alive = true;
-  let stream: { next(): Promise<unknown>; close(): Promise<void> } | undefined;
-  cleanup(() => {
-    alive = false;
-    void stream?.close().catch(fail);
-  });
-  void (async () => {
-    stream = await host.subscribe('agent', 'watchBotOutbox', { limit: 0 });
-    if (!alive) return void (await stream.close());
-    for (;;) {
-      const head = (await stream.next()) as BotOutbox | null;
-      if (!alive || head === null) return;
-      if (!head.isBot || head.through <= head.readThrough) {
-        unread.set(null);
-        continue;
-      }
-      const page = (await host.query('agent', 'botOutbox', {
-        after: head.through - 1,
-        limit: 1,
-      })) as BotOutbox;
-      if (!alive) return;
-      unread.set({ preview: head.preview, at: page.messages[0]!.at });
-    }
-  })().catch((reason) => {
-    if (alive) fail(reason);
-  });
-  return unread;
-}
 
 type UsageStore = {
   current(): Usage;
@@ -198,6 +175,7 @@ type Row = {
   icon: QuickIcon | 'maka';
   image?: (() => string | undefined) | undefined;
   title: string;
+  pluginName?: string | undefined;
   detail?: string | undefined;
   trailing?: string | undefined;
   badge?: string | undefined;
@@ -208,7 +186,12 @@ type Row = {
   run(): void;
 };
 
-type Section = { key: string; title: string | null; rows: readonly Row[]; start: number };
+type Section = {
+  key: string;
+  title: string | null;
+  rows: readonly Row[];
+  start: number;
+};
 
 function LauncherRow(props: {
   row: Row;
@@ -220,8 +203,16 @@ function LauncherRow(props: {
 }) {
   return (
     <QuickRow
-      label={`${props.row.action} ${props.row.title}`}
+      label={[
+        props.row.action,
+        props.row.title,
+        props.row.pluginName,
+        props.row.unread ? props.row.detail : undefined,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       title={props.row.title}
+      pluginName={props.row.pluginName}
       detail={props.select ? undefined : props.row.detail}
       trailing={props.select || props.shortcut ? undefined : props.row.trailing}
       badge={props.shortcut ?? props.row.badge}
@@ -355,25 +346,30 @@ function QuickSettings(props: { quick: QuickTools; tool: UiContributionRef; back
   );
 }
 
-function Launcher(
-  props: Navigation & {
-    quick: QuickTools;
-    usage: UsageStore;
-    history(): string[];
-    remember(text: string): void;
-    question: ReturnType<typeof createQuickQuestion>;
-    openQuestion(resume: boolean, text?: string): void;
-    query: Signal<string>;
-    failure: Signal<ReturnType<typeof errorText> | null>;
-    /** The tool whose settings show in place of the results. */
-    page: Signal<UiContributionRef | null>;
-    /** The tool entered by choosing its entry, searched with what is typed. */
-    scope(): ToolEntry | null;
-    selection: Signal<number>;
-    enter(item: ToolEntry, text: string): void;
-    leave(): void;
-  },
-) {
+type VoiceRequest = 'automatic' | 'manual' | null;
+
+function isQuickHistory(entry: ToolEntry | null) {
+  return entry !== null && conversationTool(entry.tool) && entry.entry.id === 'history';
+}
+
+function Launcher(props: {
+  quick: QuickTools;
+  usage: UsageStore;
+  focused(): boolean;
+  listenOnOpen: Signal<VoiceRequest>;
+  history(): string[];
+  remember(text: string): void;
+  askBot(text: string): void;
+  query: Signal<string>;
+  failure: Signal<ReturnType<typeof errorText> | null>;
+  /** The tool whose settings show in place of the results. */
+  page: Signal<UiContributionRef | null>;
+  /** The tool entered by choosing its entry, searched with what is typed. */
+  scope(): ToolEntry | null;
+  selection: Signal<number>;
+  enter(item: ToolEntry, text: string): void;
+  leave(): void;
+}) {
   // A window that does not activate leaves the keyboard with the app in use until focused.
   currentWindow().focus();
   const commandHeld = signal(false);
@@ -398,16 +394,15 @@ function Launcher(
     commandHeld() && index < 9 ? keymap.label(`mod+${index + 1}`) : undefined;
   const { query, failure, selection } = props;
   const problem = () => failure() ?? props.usage.failure();
-  const unread = watchUnread((reason) =>
-    failure.set(errorText(reason, 'Could not check Maka Bot messages.')),
-  );
+
   const { quick } = props;
   const candidates = computed(() =>
     quick
       .attached()
       .filter(({ tool }) => !props.scope() || props.scope()!.tool.key === tool.key)
-      .flatMap(({ tool, handle }) =>
-        handle.items().map((item) => {
+      .flatMap(({ tool, handle }) => {
+        const pluginName = quickPluginName(tool);
+        return handle.items().map((item) => {
           const key = `${toolStoragePath(tool)}/${item.id}`;
           return {
             key,
@@ -416,19 +411,22 @@ function Launcher(
             icon: item.icon,
             image: item.image,
             title: item.title,
+            pluginName,
             detail: item.detail,
-            trailing: item.source,
+            trailing: item.source === pluginName ? undefined : item.source,
             action: item.action,
             tool: quick.configurable(tool) ? tool : undefined,
             match: item.match,
+            recommendedAt: item.recommendedAt,
+            unread: item.recommendedAt !== undefined,
             remembered: item.remembered === true,
             run() {
               if (item.remembered) props.usage.record(key);
               item.run();
             },
           };
-        }),
-      ),
+        });
+      }),
   );
   const input = signal<InputRef | undefined>(undefined);
   const refocus = () => input()?.focus();
@@ -449,11 +447,15 @@ function Launcher(
         alias: choice?.alias,
         icon: entry.icon,
         title: entry.title,
+        pluginName: quickPluginName(tool),
         badge: word,
+        detail: entry.detail,
+        image: entry.image,
+        unread: entry.unread,
         // As Raycast does: the kind of row, after its shortcut.
         trailing: choice?.shortcut
           ? `${keymap.label(choice.shortcut)}   ${tr('Command')}`
-          : tr('Command'),
+          : (entry.trailing ?? tr('Command')),
         action: tr('Open'),
         tool,
         run: entry.run ?? (() => props.enter(item, '')),
@@ -461,31 +463,15 @@ function Launcher(
     }),
   );
   const home = computed(() => query().trim() === '' && props.scope() === null);
-  const botRow = (): Row => ({
-    key: 'bot',
-    icon: 'maka',
-    title: 'Maka Bot',
-    detail: unread()?.preview,
-    trailing: unread() === null ? undefined : clock(unread()!.at),
-    unread: unread() !== null,
-    action: tr('Open'),
-    run: () => void run(),
-  });
+  const conversationPlugin = () => quick.attached().find(({ tool }) => conversationTool(tool));
+  const conversationCommands = () => conversationPlugin()?.handle;
   const askRow = (): Row => ({
     key: 'ask',
     icon: 'maka',
     title: tr('Ask Maka'),
+    pluginName: quickPluginName(conversationPlugin()!.tool),
     action: tr('Ask Maka'),
-    run: () => void run(),
-  });
-  const questionRow = (resume: boolean): Row => ({
-    key: resume ? 'resume-question' : 'quick-question',
-    icon: 'maka',
-    image: () => quickQuestionIcon,
-    title: resume ? tr('Continue last question') : tr('Quick question'),
-    detail: resume ? props.question.turns()[0]?.question : undefined,
-    action: tr('Open'),
-    run: () => props.openQuestion(resume),
+    run: () => props.askBot(query().trim()),
   });
   const results = (): Row[] => {
     const text = query();
@@ -496,34 +482,37 @@ function Launcher(
         matchOf([row.entry.title, ...row.entry.keywords], text);
       return match === null ? [] : [{ ...row, match }];
     });
-    if (props.scope() !== null) return ranked([...candidates(), ...found], props.usage.current());
-    const question = questionRow(false);
-    const match = matchOf([question.title, 'quick question', '快问'], text);
+    const matches = [...candidates(), ...found];
     return ranked(
-      [...candidates(), ...found, ...(match === null ? [] : [{ ...question, match }])],
+      matches,
       props.usage.current(),
+      isQuickHistory(props.scope()) ? matches.length : undefined,
     );
   };
   const recommendations = (): Row[] => {
     const usage = props.usage.current();
     return recommended(candidates(), usage).map((row) => ({
       ...row,
-      detail: isFrequent(usage[row.key]!) ? tr('Frequently used') : tr('Recently used'),
+      detail:
+        row.recommendedAt !== undefined
+          ? row.detail
+          : isFrequent(usage[row.key]!)
+            ? tr('Frequently used')
+            : undefined,
     }));
   };
   const sections = computed(() => {
-    const groups: { key: string; title: string | null; rows: readonly Row[] }[] = home()
+    const groups: {
+      key: string;
+      title: string | null;
+      rows: readonly Row[];
+    }[] = home()
       ? [
           {
-            key: 'bot',
-            title: null,
-            rows: [
-              botRow(),
-              questionRow(false),
-              ...(props.question.turns().length ? [questionRow(true)] : []),
-            ],
+            key: 'recommended',
+            title: tr('Recommended'),
+            rows: recommendations(),
           },
-          { key: 'recommended', title: tr('Recommended'), rows: recommendations() },
           { key: 'tools', title: tr('Tools'), rows: entries() },
         ]
       : [{ key: 'results', title: null, rows: results() }];
@@ -538,7 +527,9 @@ function Launcher(
   const listed = computed(() => sections().flatMap((section) => section.rows));
   // A typed query keeps a way to ask the Bot below the rows that scroll, except inside a tool,
   // whose query is the tool's to search.
-  const pinned = computed(() => (home() || props.scope() !== null ? null : askRow()));
+  const pinned = computed(() =>
+    home() || props.scope() !== null || !conversationCommands() ? null : askRow(),
+  );
   const rows = computed(() => [...listed(), ...(pinned() ? [pinned()!] : [])]);
   const selected = computed(() => Math.min(selection(), rows().length - 1));
   const previewer = computed(() => {
@@ -596,46 +587,9 @@ function Launcher(
       ),
     );
   });
-  let running = false;
-  const run = async () => {
-    if (running) return;
-    running = true;
-    failure.set(null);
-    try {
-      const sessionId = await props.openBot();
-      const submitted = query();
-      const text = submitted.trim();
-      if (!(await props.vacate(sessionId))) return;
-      if (!text) {
-        props.open(sessionId);
-        return;
-      }
-      const session = host.session(sessionId);
-      const draft = await loadDraft(session);
-      // A saved draft is unfinished work and a slash command needs the composer: neither is sent.
-      if (
-        !hasComposerContent(draft.text, draft.attachments, draft.quotes) &&
-        !text.startsWith('/')
-      ) {
-        props.open(sessionId, text);
-        return;
-      }
-      await saveDraft(session, draft.revision, {
-        text: draft.text.trim() ? `${draft.text}\n\n${text}` : text,
-        attachments: draft.attachments,
-        quotes: draft.quotes,
-      });
-      // The draft holds it now; a retry after refused navigation must not append it again.
-      if (query().startsWith(submitted)) query.set(query().slice(submitted.length));
-      props.open(sessionId);
-    } catch (reason) {
-      failure.set(errorText(reason, 'Maka Bot could not be opened'));
-    } finally {
-      running = false;
-    }
-  };
   let cursor = { index: -1, draft: '', text: '' };
   const navigate = (direction: -1 | 1) => {
+    cancelVoice();
     const index = selected();
     const next = props.scope()
       ? null
@@ -649,6 +603,7 @@ function Launcher(
     }
   };
   const executeRow = (row: Row) => {
+    cancelVoice();
     if (!props.scope()) props.remember(query());
     row.run();
   };
@@ -666,11 +621,103 @@ function Launcher(
     refocus();
   };
   const menuOpen = signal(false);
+  const macDictation = platform.os === 'macos' && platform.idiom !== 'terminal';
+  const voiceRange = signal({ start: 0, end: 0 });
+  const composing = signal(false);
+  const preferencesReady = signal(false);
+  const voiceAvailable = () =>
+    macDictation &&
+    quick.attached().some(({ tool }) => dictationTool(tool)) &&
+    dictationPreferences.enabled() &&
+    props.page() === null &&
+    !props.scope();
+  const voiceActive = () => voiceAvailable() && props.focused() && !menuOpen();
+  const voiceEditor = computed(() => {
+    const node = input();
+    return node
+      ? inputEditor(node, {
+          value: query,
+          setValue(value) {
+            selection.set(0);
+            query.set(value);
+          },
+          selection: voiceRange,
+          setSelection: voiceRange.set,
+          composing,
+        })
+      : null;
+  });
+  const voice = attachDictation('quick-launcher', {
+    quickLauncher: true,
+    editor: voiceEditor,
+    draft: query,
+    selection: voiceRange,
+    active: voiceActive,
+    send() {},
+    error: (reason) => failure.set(errorText(reason, 'Dictation')),
+  });
+  const cancelVoice = () => {
+    props.listenOnOpen.set(null);
+    if (voice.phase() !== 'idle') voice.cancel();
+  };
+  const useVoice = () => {
+    if (!voiceActive()) return;
+    failure.set(null);
+    switch (voice.phase()) {
+      case 'idle':
+        void voice.start();
+        break;
+      case 'recording':
+      case 'paused':
+      case 'retry':
+        void voice.finish(false);
+        break;
+      case 'insert':
+        void voice.insert();
+        break;
+    }
+  };
+  const voiceLabel = () => {
+    switch (voice.phase()) {
+      case 'starting':
+        return tr('Preparing microphone…');
+      case 'recording':
+        return tr('Recording');
+      case 'paused':
+        return tr('Finish and transcribe');
+      case 'upload':
+        return tr('Transcribing…');
+      case 'retry':
+        return tr('Retry transcription');
+      case 'insert':
+        return tr('Insert transcript');
+      default:
+        return tr('Dictation');
+    }
+  };
+  if (macDictation) void dictationPreferences.initialize().then(() => preferencesReady.set(true));
+  effect(() => {
+    if (!voiceActive()) {
+      untracked(() => {
+        if (voice.phase() !== 'idle') voice.cancel();
+      });
+      return;
+    }
+    if (!preferencesReady() || !voiceEditor() || !props.listenOnOpen()) return;
+    const manual = props.listenOnOpen() === 'manual';
+    const automatic = dictationPreferences.listenOnOpen();
+    untracked(() => {
+      props.listenOnOpen.set(null);
+      if ((manual || automatic) && !query() && !composing()) useVoice();
+    });
+  });
+  cleanup(() => voice.cancel());
   const menuIndex = signal(-1);
   const choices = signal<readonly QuickAction[]>([]);
   const confirm = signal<QuickAction | null>(null);
   let menuRequest = 0;
   const setMenu = (open: boolean, keyboard = false) => {
+    if (open) cancelVoice();
     menuIndex.set(keyboard ? 0 : -1);
     const ticket = ++menuRequest;
     menuOpen.set(open);
@@ -733,6 +780,7 @@ function Launcher(
       ? tr('Search {tool}', { tool: props.scope()!.entry.title })
       : tr('Search tools or ask Maka');
   const openSettings = (tool: UiContributionRef) => {
+    cancelVoice();
     failure.set(null);
     props.page.set(tool);
   };
@@ -790,7 +838,7 @@ function Launcher(
                       'mod+enter',
                       () => {
                         if (!props.scope() && query().trim())
-                          props.openQuestion(false, query().trim());
+                          conversationCommands()?.askQuestion?.(query().trim());
                       },
                       { when: 'always', within: node },
                     ),
@@ -809,7 +857,13 @@ function Launcher(
                 accessibilityLabel={placeholder()}
                 placeholder={placeholder()}
                 value={query()}
+                onSelectionChange={({ start, end }) => voiceRange.set({ start, end })}
+                onCompositionChange={(event) => {
+                  composing.set(event.composing);
+                  if (event.composing) cancelVoice();
+                }}
                 onChange={({ value }) => {
+                  if (value !== query()) cancelVoice();
                   if (menuOpen()) setMenu(false);
                   cursor = { index: -1, draft: '', text: '' };
                   failure.set(null);
@@ -832,15 +886,46 @@ function Launcher(
                   selection.set(0);
                   query.set(value);
                 }}
-                onSubmit={() => (menuOpen() ? selectAction(choices()[menuIndex()]) : activate())}
+                onSubmit={() => {
+                  if (voice.phase() !== 'idle') useVoice();
+                  else if (menuOpen()) selectAction(choices()[menuIndex()]);
+                  else activate();
+                }}
                 style={{ ...quickInputStyle(), flex: 1, minWidth: 0, marginTop: 8 }}
               />
             )}
           </Each>
-          <If when={props.scope() === null && !!query().trim()}>
+          <If when={voiceAvailable() && !menuOpen()}>
+            <Button
+              accessibilityLabel={voiceLabel()}
+              tooltip={textTooltip(() =>
+                voice.phase() === 'recording' ? tr('Finish and transcribe') : voiceLabel(),
+              )}
+              onPress={useVoice}
+              style={{
+                height: QUICK_BAR_SLOT,
+                paddingHorizontal: 6,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <Icon
+                name="mic"
+                size={16}
+                color={voice.phase() === 'recording' ? C.danger : C.secondary}
+              />
+              <If when={voice.phase() !== 'idle'}>
+                <Text style={{ color: C.secondary, fontSize: 12 }}>{voiceLabel()}</Text>
+              </If>
+            </Button>
+          </If>
+          <If
+            when={conversationCommands()?.askQuestion && props.scope() === null && !!query().trim()}
+          >
             <Button
               accessibilityLabel={tr('Quick question')}
-              onPress={() => props.openQuestion(false, query().trim())}
+              onPress={() => conversationCommands()?.askQuestion?.(query().trim())}
               style={{ height: QUICK_BAR_SLOT, justifyContent: 'center', paddingHorizontal: 8 }}
             >
               <Text style={{ color: C.secondary, fontSize: 12 }}>
@@ -1050,6 +1135,8 @@ function QuickEditor(props: { editor: QuickTextEditor; back(): void }) {
 
 export function QuickLauncher(
   props: Navigation & {
+    showQuestion(id: string): Promise<void>;
+    currentSession(): string | null;
     opened: Signal<boolean>;
     conversing(): boolean;
     conversation(): JSX.Element;
@@ -1063,8 +1150,137 @@ export function QuickLauncher(
   const { commands, handles } = quick;
   const failure = signal<ReturnType<typeof errorText> | null>(null);
   const usage = createUsageStore();
-  const question = createQuickQuestion(props.openBot);
-  const asking = signal(false);
+  const quickHost = createHost(uiHost);
+  const questionBot = async () => {
+    const receipt = await quickHost.control('openBot', {});
+    const result = roomResult<Output<'agent', 'openBot'>>(receipt.reply);
+    if (result.kind !== 'opened') throw Error(result.reason);
+    return result.sessionId;
+  };
+  const question = createQuickQuestion(questionBot);
+  const reading = signal(false);
+  const promoting = signal(false);
+  type HistoryItem = {
+    id: string;
+    title: string;
+    updatedAt: number;
+    local?: QuickThread;
+  };
+  const library = signal<HistoryItem[]>([]);
+  const libraryStatus = signal('');
+  let loadingLibrary = 0;
+  let creating = false;
+  const formalQuestions = async () => {
+    const matches: AgentSession[] = [];
+    let position: AgentSessionPosition = { kind: 'start' };
+    for (;;) {
+      const result: Output<'agent', 'list'> = await quickHost.query('agent', 'list', {
+        kind: 'agent',
+        filter: 'all',
+        position,
+      });
+      matches.push(...result.sessions.filter((item) => item.labels.includes('quick-question')));
+      if (!result.after) return matches;
+      position = { kind: 'after', revision: result.revision, cursor: result.after };
+    }
+  };
+  const promote = async () => {
+    const item = question.thread();
+    if (!item || promoting() || question.running() || !item.turns.length) return;
+    promoting.set(true);
+    question.error.set('');
+    try {
+      const existing = (await formalQuestions()).find((s) => s.labels.includes('quick:' + item.id));
+      let id = existing?.id;
+      if (!id) {
+        const sessionId = await questionBot();
+        const bot = await quickHost.query('agent', 'observe', { sessionId });
+        const receipt = (await host.mutation('agent', 'import', {
+          kind: 'quick_question',
+          thread: item.id,
+          turns: item.turns.map(({ question, answer, replyInfo }) => ({
+            question,
+            answer,
+            replyInfo,
+          })),
+          title: [...item.turns[0]!.question].slice(0, 80).join('').replace(/\s+/g, ' ').trim(),
+          path: bot.session.workspace.path,
+          backend: bot.session.backend ?? bot.rememberedBackend,
+        })) as { reply: unknown };
+        const result = roomResult<Output<'agent', 'import'>>(receipt.reply);
+        if (result.kind !== 'imported') throw Error(result.kind);
+        id = result.session.id;
+      }
+      await question.remove(item.id);
+      await props.showQuestion(id);
+    } catch (reason) {
+      question.error.set(String(reason));
+    } finally {
+      promoting.set(false);
+    }
+  };
+  const openHistory = async () => {
+    const request = ++loadingLibrary;
+    try {
+      library.set([]);
+      libraryStatus.set(tr('Loading…'));
+      const [sessions, local] = await Promise.all([formalQuestions(), question.list()]);
+      if (request !== loadingLibrary || !props.opened() || !inQuickHistory()) return;
+      const published = new Set(sessions.flatMap((item) => item.labels));
+      const matches: HistoryItem[] = [
+        ...sessions,
+        ...local
+          .filter((item) => !published.has('quick:' + item.id))
+          .map((item) => ({
+            id: item.id,
+            title: item.turns[0]!.question,
+            updatedAt: item.updatedAt,
+            local: item,
+          })),
+      ];
+      library.set(matches.sort((a, b) => b.updatedAt - a.updatedAt));
+      libraryStatus.set(matches.length ? '' : tr('No conversations yet.'));
+    } catch (reason) {
+      if (request === loadingLibrary) libraryStatus.set(String(reason));
+    }
+  };
+  const createSession = async (sessionId: string, quickQuestion: boolean) => {
+    const bot = await quickHost.query('agent', 'observe', { sessionId });
+    const receipt = await quickHost.control('create', {
+      title: quickQuestion ? tr('New quick question') : tr('New conversation'),
+      automaticTitle: true,
+      labels: quickQuestion ? ['quick-question'] : [],
+      workspace: { kind: 'session', sessionId },
+      backend: bot.session.backend ?? bot.rememberedBackend,
+    });
+    const result = roomResult<AgentCreated>(receipt.reply);
+    if (result.kind !== 'created') throw Error(result.reason);
+    return result.session.id;
+  };
+  const askQuestion = async (text: string) => {
+    if (creating || !text) return;
+    creating = true;
+    try {
+      await quick.questionPreferenceReady;
+      if (!props.opened()) return;
+      if (!quick.syncQuestions()) {
+        if (question.running()) return;
+        remember(text);
+        reading.set(true);
+        await question.ask(text, null);
+        return;
+      }
+      const sessionId = await questionBot();
+      if (!props.opened()) return;
+      const id = await createSession(sessionId, true);
+      remember(text);
+      if (props.opened()) props.open(id, text);
+    } catch (reason) {
+      failure.set(errorText(reason, 'Quick question failed.'));
+    } finally {
+      creating = false;
+    }
+  };
   const inputs = signal<string[]>([]);
   const historyKey = 'maka.quick-launcher.search-history';
   let saves = Storage.getItem(historyKey)
@@ -1089,16 +1305,26 @@ export function QuickLauncher(
   };
   const page = signal<UiContributionRef | null>(null);
   const query = signal('');
+  const panelBlurred = signal(false);
+  const listenOnOpen = signal<VoiceRequest>(null);
   const selection = signal(0);
 
   // Tools live as long as the app, not the popup, so their commands run from shortcuts too.
   const tools = computed(() => quick.tools().filter(quick.toolEnabled));
   const tool = signal<ToolScope | null>(null);
   const scope = () => tool()?.entry ?? null;
+  const inQuickHistory = () => isQuickHistory(scope());
+  effect(() => {
+    if (props.opened() && inQuickHistory() && !reading()) void openHistory();
+    else ++loadingLibrary;
+  });
   const editor = signal<QuickTextEditor | null>(null);
   const enter = (entry: ToolEntry, text: string) =>
     batch(() => {
-      const previous = tool()?.previous ?? { query: query(), selection: selection() };
+      const previous = tool()?.previous ?? {
+        query: query(),
+        selection: selection(),
+      };
       tool.set({ entry, previous });
       query.set(text);
       selection.set(0);
@@ -1113,6 +1339,60 @@ export function QuickLauncher(
       selection.set(current.previous.selection);
       failure.set(null);
     });
+  let running = false;
+  const askBot = async (text: string) => {
+    if (running) return;
+    if (!props.opened()) show(null);
+    if (text) remember(text);
+    running = true;
+    failure.set(null);
+    try {
+      const sessionId = await props.openBot();
+
+      if (!(await props.vacate(sessionId))) return;
+      if (!text) {
+        props.open(sessionId);
+        return;
+      }
+      const session = host.session(sessionId);
+      const draft = await loadDraft(session);
+      // A saved draft is unfinished work and a slash command needs the composer: neither is sent.
+      if (
+        !hasComposerContent(draft.text, draft.attachments, draft.quotes) &&
+        !text.startsWith('/')
+      ) {
+        props.open(sessionId, text);
+        return;
+      }
+      await saveDraft(session, draft.revision, {
+        text: draft.text.trim() ? `${draft.text}\n\n${text}` : text,
+        attachments: draft.attachments,
+        quotes: draft.quotes,
+      });
+      // The draft holds it now; a retry after refused navigation must not append it again.
+      if (text && query().trim() === text) query.set('');
+      props.open(sessionId);
+    } catch (reason) {
+      failure.set(errorText(reason, 'Maka Bot could not be opened'));
+    } finally {
+      running = false;
+    }
+  };
+  const openOrdinarySession = async (id: string | null) => {
+    if (creating) return;
+    creating = true;
+    try {
+      if (id === null) {
+        const source = props.currentSession() ?? (await questionBot());
+        id = await createSession(source, false);
+      }
+      if (props.opened() && (await props.vacate(id)) && props.opened()) props.open(id);
+    } catch (reason) {
+      failure.set(errorText(reason, 'Quick question failed.'));
+    } finally {
+      creating = false;
+    }
+  };
   const toolView = (tool: UiContributionRef) => {
     cleanup(() => {
       const remaining = new Map(handles());
@@ -1125,6 +1405,65 @@ export function QuickLauncher(
         if (!entered) return query();
         return entered.tool.key === tool.key ? `${entered.entry.keywords[0]} ${query()}` : '';
       },
+      ...(dictationTool(tool)
+        ? {
+            startDictation: async () => {
+              await dictationPreferences.initialize();
+              if (!quick.toolEnabled(tool)) return;
+              if (dictationPreferences.enabled()) show(null, 'manual');
+              else {
+                show(null);
+                page.set(tool);
+              }
+            },
+          }
+        : {}),
+      ...(conversationTool(tool)
+        ? {
+            conversations: {
+              visible: props.opened,
+              home: () => scope() === null && !query().trim(),
+              askQuestion: (text) => void askQuestion(text),
+              sessionQuery: () =>
+                props.opened() && scope()?.tool.key === tool.key && scope()?.entry.id === 'sessions'
+                  ? query()
+                  : null,
+              openBot: () => void askBot(''),
+              openSession: (id) => void openOrdinarySession(id),
+              historyItems: () => {
+                if (!inQuickHistory() || scope()?.tool.key !== tool.key) return [];
+                const text = query().trim();
+                return library().flatMap((item) => {
+                  const match = text ? matchOf([item.title], text) : 0;
+                  if (match === null) return [];
+                  return [
+                    {
+                      id: 'history/' + item.id,
+                      title: item.title,
+                      icon: 'note' as const,
+                      source: tr('Quick Q&A'),
+                      action: tr('Open'),
+                      match,
+                      run: () => {
+                        if (!item.local) {
+                          void openOrdinarySession(item.id);
+                          return;
+                        }
+                        if (question.running() && question.thread()?.id !== item.id) return;
+                        if (!question.running()) {
+                          question.thread.set(item.local);
+                          question.error.set('');
+                        }
+                        reading.set(true);
+                      },
+                    },
+                  ];
+                });
+              },
+              historyStatus: () => (inQuickHistory() ? libraryStatus() : ''),
+            } satisfies ConversationLauncher,
+          }
+        : {}),
       editText: (next) => editor.set(next),
       enter: (id, text) => {
         const entry = quick
@@ -1138,13 +1477,15 @@ export function QuickLauncher(
       attach: (handle) => handles.set(new Map(handles()).set(tool.key, handle)),
     });
   };
-  const show = (entered: ToolEntry | null) =>
+  const show = (entered: ToolEntry | null, listen: VoiceRequest = null) =>
     batch(() => {
+      panelBlurred.set(false);
+      listenOnOpen.set(listen);
       query.set('');
       selection.set(0);
       tool.set(null);
       editor.set(null);
-      asking.set(false);
+      reading.set(false);
       failure.set(null);
       page.set(null);
       if (entered !== null) enter(entered, '');
@@ -1152,7 +1493,7 @@ export function QuickLauncher(
     });
   const toggle = () => {
     if (props.opened()) void props.close();
-    else show(null);
+    else show(null, 'automatic');
   };
   /** A command's shortcut: runs it, or opens the launcher inside its tool. */
   const launch = (key: string) => {
@@ -1219,7 +1560,7 @@ export function QuickLauncher(
         // Escape stops a running reply, and every way out has to save the draft first. In a tool's
         // settings Escape goes back, and a picker the page opens must not close it.
         closeOnEscape={
-          !asking() &&
+          !reading() &&
           !props.conversing() &&
           page() === null &&
           scope() === null &&
@@ -1227,6 +1568,7 @@ export function QuickLauncher(
         }
         closeOnBlur={!props.conversing() && page() === null}
         onFocusChange={({ focused }) => {
+          panelBlurred.set(!focused);
           // Keep the conversation mounted until its pending draft has been saved.
           if (!focused && props.opened() && props.conversing()) void props.close();
         }}
@@ -1235,43 +1577,32 @@ export function QuickLauncher(
         open={props.opened() && quick.enabled()}
         onOpenChange={({ open }) => {
           if (open) return;
+          listenOnOpen.set(null);
+          panelBlurred.set(true);
           editor.set(null);
-          asking.set(false);
+          reading.set(false);
           page.set(null);
           tool.set(null);
           props.closed();
         }}
       >
         <If
-          when={props.conversing()}
+          when={reading()}
           else={
             <If
-              when={editor() !== null}
+              when={props.conversing()}
               else={
                 <If
-                  when={asking()}
+                  when={editor() !== null}
                   else={
                     <Launcher
-                      question={question}
                       history={inputs}
                       remember={remember}
-                      openQuestion={(resume, text) => {
-                        if (!resume && question.running()) {
-                          asking.set(true);
-                          return;
-                        }
-                        if (!resume) question.reset();
-                        asking.set(true);
-                        if (!resume && text) {
-                          remember(text);
-                          void question.ask(text, false);
-                        }
-                      }}
-                      openBot={props.openBot}
-                      vacate={props.vacate}
-                      open={props.open}
+                      askBot={(text) => void askBot(text)}
                       quick={quick}
                       usage={usage}
+                      focused={() => props.opened() && !panelBlurred()}
+                      listenOnOpen={listenOnOpen}
                       query={query}
                       failure={failure}
                       page={page}
@@ -1282,15 +1613,32 @@ export function QuickLauncher(
                     />
                   }
                 >
-                  <QuickQuestionPanel question={question} back={() => asking.set(false)} />
+                  <QuickEditor editor={editor()!} back={() => editor.set(null)} />
                 </If>
               }
             >
-              <QuickEditor editor={editor()!} back={() => editor.set(null)} />
+              <View style={[frameStyle(), { maxHeight: MAX_HEIGHT }]}>{props.conversation()}</View>
             </If>
           }
         >
-          <View style={[frameStyle(), { maxHeight: MAX_HEIGHT }]}>{props.conversation()}</View>
+          <HostProvider value={quickHost}>
+            <View style={[frameStyle(), { maxHeight: MAX_HEIGHT }]}>
+              <QuickQuestionPanel
+                question={question}
+                promoting={promoting}
+                promote={() => void promote()}
+                back={() => {
+                  reading.set(false);
+                  if (!inQuickHistory()) {
+                    const history = quick
+                      .entries()
+                      .find((item) => conversationTool(item.tool) && item.entry.id === 'history');
+                    if (history) enter(history, '');
+                  }
+                }}
+              />
+            </View>
+          </HostProvider>
         </If>
       </Window>
     </>

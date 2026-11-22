@@ -39,9 +39,12 @@ import {
 import { createConversationUi, type ConversationWindow } from './SessionSurface';
 import { invokeFocusedConversation } from '../../../../products/maka/workbench/app/conversationCommands';
 import type { WorkspaceViewHandle } from '../../../../packages/plugin-sdk/src/workspace-view.js';
+import { QuickConversations, type QuickConversationsInput } from './QuickConversations';
+import { quickToolView } from '../../../../packages/plugin-sdk/src/workbench-views.js';
 import { RoomView } from './RoomView';
 import { createHost, HostProvider } from '../../../../products/maka/workbench/app/host';
 import { initializeComposerToolbar } from '../../../../products/maka/workbench/app/composerToolbar';
+import { initializeSidebarPreferences } from '../../../../products/maka/workbench/app/sidebarPreferences';
 import {
   createRoomPeople,
   RoomTimeline,
@@ -55,6 +58,7 @@ import { createText, errorText } from '../../../../products/maka/workbench/app/t
 export const activate: UiModule<JSX.Element>['activate'] = (context) => {
   const host = createHost(context.application);
   initializeComposerToolbar();
+  initializeSidebarPreferences();
   const sides = signal<ReturnType<typeof createConversationUi>[]>([]);
   const rooms = signal<{ id: string; flush(): Promise<void> }[]>([]);
   const window: ConversationWindow = {
@@ -120,8 +124,10 @@ export const activate: UiModule<JSX.Element>['activate'] = (context) => {
           sessionId={id}
           host={host}
           visible={shell.visible}
+          workspacePath={() => props.room.workspace.path}
           name={people.name}
           resolveNames={people.resolveNames}
+          rememberParticipants={people.rememberParticipants}
           searchSessions={people.searchSessions}
           openAgent={(id) => void shell.openSession(id)}
           openLink={async (target, restoreFocus) => {
@@ -223,11 +229,47 @@ export const activate: UiModule<JSX.Element>['activate'] = (context) => {
   return {
     exports: {
       ...commands,
+      quickConversations: {
+        kind: 'view',
+        contract: quickToolView.id,
+        render({ input }: UiEmbeddedViewProps<QuickConversationsInput, JSX.Element>) {
+          return <QuickConversations input={input} host={host} />;
+        },
+      },
       rooms: {
         kind: 'view',
         contract: roomWorkspaceView.id,
         render({ input }: UiEmbeddedViewProps<RoomWorkspaceInput<JSX.Element>, JSX.Element>) {
-          return <RoomView host={host} input={input} />;
+          return (
+            <RoomView
+              host={host}
+              input={input}
+              renderAgentSide={(side) => (
+                <AgentSide
+                  input={{
+                    active: side.active,
+                    attach: side.attach,
+                    shell: {
+                      sessionId: side.sessionId,
+                      visible: side.visible,
+                      paneVisible: side.visible,
+                      blocked: side.blocked,
+                      connectionLost: () => false,
+                      openSession: side.openSession,
+                      openSettings: () => side.openSettings(),
+                      sidebarShown: () => true,
+                      sidebarDocked: () => true,
+                      previewDocked: () => false,
+                      showSidebar() {},
+                      hideSidebar() {},
+                      dismissRoute: () => false,
+                      closePane: side.close,
+                    },
+                  }}
+                />
+              )}
+            />
+          );
         },
       },
       navigation: {

@@ -2469,7 +2469,7 @@ export type AgentGoalChange =
       action: GoalControl;
       budget?: AgentGoalBudget | null;
       /**
-       * Explicit renewed model and session authority, only for Resume without a pending iteration.
+       * Explicit renewed execution source and session authority, only for Resume without a pending iteration.
        */
       approval?: AgentGoalApproval | null;
     };
@@ -2723,32 +2723,41 @@ export type AgentScheduleResult =
       kind: 'rejected';
       reason: string;
     };
-export type PresetRevision = number;
-/**
- * A complete logical Turn boundary within the source session.
- */
-export type AgentForkPosition =
+export type MemoryKind = 'unspecified' | 'fact' | 'preference' | 'instruction';
+export type MemoryStatement = 'unspecified' | 'assertion' | 'preference' | 'intention';
+export type MemoryTemporal =
   | {
-      kind: 'start';
+      kind: 'unspecified';
     }
   | {
-      kind: 'end';
+      kind: 'timeless';
     }
   | {
-      kind: 'through_turn';
-      turnId: string;
+      kind: 'interval';
+      start: number;
+      end?: number | null;
+    };
+export type MemoryScope =
+  | {
+      kind: 'personal';
     }
   | {
-      kind: 'before_turn';
-      turnId: string;
+      kind: 'project';
+      sessionId: string;
+    };
+export type RecallFactSource =
+  | {
+      kind: 'user_operation';
+      operationId: string;
+      [k: string]: unknown | undefined;
     }
   | {
-      kind: 'through_source_turn';
-      position: HistoryRowAddress;
-    }
-  | {
-      kind: 'before_source_turn';
-      position: HistoryRowAddress;
+      kind: 'conversation';
+      sessionId: string;
+      row: HistoryRowAddress;
+      start: number;
+      end: number;
+      [k: string]: unknown | undefined;
     };
 /**
  * An original row within the actual read capability supplied by the caller.
@@ -2777,6 +2786,33 @@ export type HistoryRowAddress =
       partOrdinal: number;
     };
 export type FactId = string;
+export type PresetRevision = number;
+/**
+ * A complete logical Turn boundary within the source session.
+ */
+export type AgentForkPosition =
+  | {
+      kind: 'start';
+    }
+  | {
+      kind: 'end';
+    }
+  | {
+      kind: 'through_turn';
+      turnId: string;
+    }
+  | {
+      kind: 'before_turn';
+      turnId: string;
+    }
+  | {
+      kind: 'through_source_turn';
+      position: HistoryRowAddress;
+    }
+  | {
+      kind: 'before_source_turn';
+      position: HistoryRowAddress;
+    };
 export type AgentSessionActivity = 'idle' | 'working' | 'waiting';
 export type AgentImportsRead =
   | {
@@ -3152,6 +3188,18 @@ export type AgentImportChange =
       kind: 'remove_source';
       revision: number;
       id: string;
+    }
+  | {
+      kind: 'quick_question';
+      thread: string;
+      /**
+       * @minItems 1
+       * @maxItems 32
+       */
+      turns: [QuickTurn, ...QuickTurn[]];
+      path: string;
+      title: string;
+      backend?: AgentBackendPreference | null;
     }
   | {
       kind: 'copy';
@@ -4452,6 +4500,10 @@ export type HistoryPosition =
       messageId: string;
     }
   | {
+      kind: 'around_message';
+      messageId: string;
+    }
+  | {
       kind: 'row';
       position: HistoryRowAddress;
       field: HistoryField;
@@ -4499,8 +4551,10 @@ export type MessageOrigin =
       kind: 'room';
       sessionId: string;
       messageId: string;
-      author: RoomAuthor;
+      author: AgentRoomAuthor;
       replyTo?: string | null;
+      mentions?: string[];
+      hopCount?: number | null;
     }
   | {
       kind: 'automation';
@@ -4520,7 +4574,7 @@ export type MessageOrigin =
       kind: 'discovery_report';
       sessionId: string;
     };
-export type RoomAuthor =
+export type AgentRoomAuthor =
   | {
       kind: 'human';
     }
@@ -4532,6 +4586,7 @@ export type AgentDeliveryPage =
   | {
       kind: 'room';
       through: number;
+      revision: number;
     }
   | {
       kind: 'events';
@@ -4752,6 +4807,68 @@ export type AgentHistoryPage =
       before: Cursor | null;
       after: Cursor | null;
     };
+export type AgentRoomActor =
+  | {
+      kind: 'human';
+    }
+  | {
+      kind: 'session';
+      sessionId: string;
+    };
+/**
+ * Derived execution outcome for a Room mention delivery.
+ */
+export type AgentRoomDeliveryState =
+  | {
+      kind: 'queued';
+      sessionId: string;
+      messageId: string;
+    }
+  | {
+      kind: 'working';
+      sessionId: string;
+      messageId: string;
+    }
+  | {
+      kind: 'waiting';
+      sessionId: string;
+      messageId: string;
+      pendingCount: number;
+    }
+  | {
+      kind: 'replied';
+      sessionId: string;
+      messageId: string;
+      replyMessageId: string;
+    }
+  | {
+      kind: 'reacted';
+      sessionId: string;
+      messageId: string;
+      emoji: string;
+    }
+  | {
+      kind: 'silent';
+      sessionId: string;
+      messageId: string;
+    }
+  | {
+      kind: 'failed';
+      sessionId: string;
+      messageId: string;
+      reason?: string | null;
+    }
+  | {
+      kind: 'stopped';
+      sessionId: string;
+      messageId: string;
+    }
+  | {
+      kind: 'rejected';
+      sessionId: string;
+      reason: string;
+    };
+export type AgentRoomParticipantActivity = 'idle' | 'working' | 'waiting';
 export type AgentHistorySearchPage = {
   kind: 'ready';
   through: number;
@@ -5428,6 +5545,7 @@ export interface UiInstance {
   instance: InstanceId;
   path: string[];
   package: PackageRef;
+  presentation?: PackagePresentation;
   configuration: unknown;
   module: string;
   definitionBasis: string;
@@ -5438,6 +5556,20 @@ export interface UiInstance {
   contributions: {
     [k: string]: UiContribution | undefined;
   };
+}
+export interface PackagePresentation {
+  displayName: string;
+  description: string;
+  localizations?: {
+    [k: string]: PackageDescription | undefined;
+  };
+}
+/**
+ * Author-provided copy for plugin discovery; never an authority declaration.
+ */
+export interface PackageDescription {
+  displayName: string;
+  description: string;
 }
 export interface UiText {
   fallback: string;
@@ -5520,20 +5652,6 @@ export interface ManagedInstance {
   structural: boolean;
   disabled: boolean;
   parentDisabled: boolean;
-}
-export interface PackagePresentation {
-  displayName: string;
-  description: string;
-  localizations?: {
-    [k: string]: PackageDescription | undefined;
-  };
-}
-/**
- * Author-provided copy for plugin discovery; never an authority declaration.
- */
-export interface PackageDescription {
-  displayName: string;
-  description: string;
 }
 export interface InstanceSetEnabled {
   expectedRevision: number;
@@ -7508,8 +7626,10 @@ export interface GoalReport {
 }
 export interface AgentGoalApproval {
   target: AgentScheduledTarget;
-  model: ModelSelection;
-  thinkingLevel?: ThinkingLevel | null;
+  /**
+   * Native model or external Agent that runs later iterations.
+   */
+  backend: AgentBackendPreference;
 }
 /**
  * Exact observed source boundary. This data is checked against the original
@@ -7633,9 +7753,16 @@ export interface Create {
 }
 export interface RecallQuery {
   /**
+   * Supply 1 to 32 search terms of at most 256 UTF-8 bytes each.
+   *
    * @minItems 1
+   * @maxItems 32
    */
   terms: [string, ...string[]];
+  /**
+   * Resume current memory facts after the last returned key.
+   */
+  facts_after?: number | null;
   /**
    * An explicit caller-selected result budget; omission retains all matching results.
    */
@@ -7645,10 +7772,28 @@ export interface RecallQuery {
   until?: number | null;
 }
 export interface AgentRecallPage {
+  facts: RecallFact[];
+  nextFactsAfter?: number | null;
   titles: AgentSession[];
   passages: AgentRecallPassage[];
   complete: boolean;
   gaps: string[];
+}
+export interface RecallFact {
+  metadata: MemoryMetadata;
+  id: string;
+  revision: number;
+  assertion: number;
+  scope: MemoryScope;
+  body: string;
+  sources: RecallFactSource[];
+  sourcesComplete: boolean;
+  [k: string]: unknown | undefined;
+}
+export interface MemoryMetadata {
+  kind: MemoryKind;
+  statement: MemoryStatement;
+  temporal: MemoryTemporal;
 }
 export interface AgentSession {
   incognito?: boolean;
@@ -7814,6 +7959,19 @@ export interface AgentImportPreviewItem {
   kind: AgentImportRecordKind;
   text: string;
   truncated: boolean;
+}
+export interface QuickTurn {
+  question: string;
+  answer: string;
+  replyInfo?: QuickReplyInfo | null;
+}
+/**
+ * Provider-reported counters and measured generation time, copied with a quick reply.
+ */
+export interface QuickReplyInfo {
+  modelId: string;
+  durationMs: number;
+  usage: ModelUsage;
 }
 export interface AgentProjectCursor {
   revision: string;
@@ -8032,10 +8190,10 @@ export interface AgentSend {
         QuoteRef,
       ];
   /**
-   * Defaults to steer. Omit or use steer for updates to ongoing work;
-   * use queue only when this message should wait until the current turn ends.
+   * Defaults to steer (injects cleanly at the next step boundary without aborting in-flight tools).
+   * Pass queue to wait until the current turn finishes before delivering.
    */
-  delivery?: AgentSendDelivery;
+  delivery?: AgentSendDelivery | null;
   /**
    * An active send must not start new work after Stop fences its original Run.
    */
@@ -8730,6 +8888,7 @@ export interface AgentHistoryChunk {
    * Includes body text and source citations; never a Thinking field.
    */
   finalOutput?: boolean;
+  replyInfo?: QuickReplyInfo | null;
   /**
    * The provider identified this text as final before the Turn completed.
    */
@@ -8789,6 +8948,7 @@ export interface AgentHistoryAttachment {
  * historical boundary alone does not establish that execution is still live.
  */
 export interface HistoryTurnTiming {
+  modelTokens?: ModelUsage | null;
   startedAt: number;
   finished: HistoryTurnFinished | null;
   executorUsage?: ExecutorTurnUsage | null;
@@ -8892,20 +9052,41 @@ export interface AgentRoomHistoryPage {
   through: number;
   before?: string | null;
   after?: string | null;
+  participants?: AgentRoomMember[];
 }
 export interface AgentRoomMessage {
   id: string;
   sequence: number;
   at: number;
-  author: RoomAuthor;
+  author: AgentRoomAuthor;
   content: AgentRoomContent;
   replyTo?: string | null;
   mentions: string[];
   deliveries: RoomDelivery[];
+  editedAt?: number | null;
+  deletedAt?: number | null;
+  reactions?: AgentRoomReaction[];
+  pinned?: boolean;
+  deliveryStates?: AgentRoomDeliveryState[];
 }
 export interface AgentRoomContent {
   text: string;
   attachments: AgentHistoryAttachment[];
+}
+export interface AgentRoomReaction {
+  emoji: string;
+  actors: AgentRoomActor[];
+}
+export interface AgentRoomMember {
+  sessionId: string;
+  title: string;
+  presetName?: string | null;
+  workspacePath: string;
+  activity: AgentRoomParticipantActivity;
+  pendingInteractions?: number;
+  archived?: boolean;
+  unavailable?: boolean;
+  addedAt?: number | null;
 }
 export interface AgentHistorySearch {
   sessionId: string;

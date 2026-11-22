@@ -17,135 +17,167 @@
  * under the License.
  */
 
-import { Clipboard, cleanup, keymap, Scroll, signal, Text, View, type ScrollRef } from 'nsh';
-import { Button, Input, TextView } from 'nsh/base';
-import { MakaMark, quickBarStyle, quickInputStyle } from './QuickBar';
+import { cleanup, keymap, List, openUrl, signal, Text, View, type ListRef } from 'nsh';
+import { Button, Menu, MenuItem } from 'nsh/base';
+import { compactTranscriptSize, CompactInputBar } from './QuickBar';
 import type { createQuickQuestion } from './quickQuestion';
+import { MessageRow } from './MessageRow';
+import { BotWorking } from './BotReply';
+import { Icon } from './Icon';
 import { tr } from './locale';
-import { C, bodyTextStyle } from './ui';
+import {
+  C,
+  controlStyle,
+  floatingStyle,
+  menuRowStyle,
+  menuRowHoverStyle,
+  IconButton,
+  quietHoverStyle,
+  quietFocusStyle,
+} from './ui';
 
 export function QuickQuestionPanel(props: {
   question: ReturnType<typeof createQuickQuestion>;
+  promoting(): boolean;
+  promote(): void;
   back(): void;
 }) {
-  const draft = signal('');
   const { question } = props;
+  const draft = signal('');
+  const menu = signal(false);
+  const busy = () => question.running() || props.promoting();
   const back = () => {
-    if (question.running()) question.stop();
-    else props.back();
+    if (menu()) menu.set(false);
+    else if (question.running()) question.stop();
+    else if (!props.promoting()) props.back();
   };
   cleanup(keymap.bind('escape', back, { when: 'always' }));
+  cleanup(keymap.bind('mod+k', () => menu.set(!menu()), { when: 'always' }));
   const submit = () => {
     const text = draft().trim();
-    if (!text || question.running()) return;
+    if (!text || busy()) return;
     draft.set('');
-    followAnswer = true;
-    void question.ask(text, question.turns().length > 0);
+    list?.scrollToEnd({ animated: false });
+    void question.ask(text, question.thread());
   };
-  let scroll: ScrollRef | undefined;
-  let followAnswer = true;
-  const error = signal('');
+  let list: ListRef | undefined;
+  const transcriptSize = compactTranscriptSize();
+  const rows = () =>
+    (question.thread()?.turns ?? []).flatMap((turn, i) =>
+      (
+        [
+          ['user', turn.question],
+          ['assistant', turn.answer],
+        ] as const
+      )
+        .filter(([, text]) => text.length > 0)
+        .map(([role, text]) => ({
+          key: question.thread()!.id + '/' + i + '-' + role,
+          timestamp: role === 'assistant' ? turn.answeredAt : turn.askedAt,
+          role,
+          text,
+          field: 'body',
+          replyInfo: role === 'assistant' ? turn.replyInfo : undefined,
+        })),
+    );
+  const listHeight = () => {
+    const current = rows();
+    return transcriptSize.height(current.length, (index) => current[index]!.key);
+  };
   return (
-    <View style={{ backgroundColor: C.panel, borderRadius: 12, overflow: 'hidden' }}>
-      <View style={{ ...quickBarStyle, alignItems: 'center' }}>
-        <MakaMark />
-        <Input
-          autoFocus
-          accessibilityLabel={tr('Quick question')}
-          placeholder={question.turns().length ? tr('Ask a follow-up') : tr('Ask a question')}
-          value={draft()}
-          onChange={({ value }) => draft.set(value)}
-          onSubmit={submit}
-          style={{ ...quickInputStyle(), flex: 1 }}
-        />
-      </View>
-      <Scroll
-        ref={(node) => {
-          scroll = node;
-        }}
-        style={{ height: question.turns().length ? 300 : 0 }}
-        onScroll={({ offset, contentSize, size }) => {
-          followAnswer = offset.y >= contentSize.height - size.height - 48;
-        }}
-      >
-        <View
-          onLayout={() => {
-            if (followAnswer) scroll?.scrollToEnd({ animated: false });
-          }}
-          style={{ padding: 16, gap: 12 }}
-        >
-          <Each of={question.turns()} key={(_, i) => String(i)}>
-            {(turn) => (
-              <View style={{ gap: 12 }}>
-                <Text
-                  style={{
-                    ...bodyTextStyle,
-                    alignSelf: 'flex-end',
-                    maxWidth: '85%',
-                    padding: 8,
-                    borderRadius: 8,
-                    backgroundColor: C.raised,
-                    color: C.text,
-                  }}
+    <View style={{ flexShrink: 1, minHeight: 0 }}>
+      <CompactInputBar
+        label={tr('Quick question')}
+        placeholder={tr('Ask a follow-up')}
+        value={draft()}
+        change={(value) => draft.set(value)}
+        submit={submit}
+        actions={
+          <>
+            <If when={question.running()}>
+              <IconButton label={tr('Stop')} icon="stop" onPress={question.stop} />
+            </If>
+            <Menu
+              open={menu()}
+              onOpenChange={({ open }) => menu.set(open)}
+              placement="bottom"
+              align="end"
+              popupStyle={{ ...floatingStyle(), width: 224 }}
+              trigger={
+                <Button
+                  accessibilityLabel={tr('Launcher actions')}
+                  style={{ ...controlStyle, width: 32, paddingHorizontal: 8, alignItems: 'center' }}
+                  hoverStyle={quietHoverStyle()}
+                  focusStyle={quietFocusStyle()}
                 >
-                  {turn().question}
-                </Text>
-                <If
-                  when={!!turn().answer}
-                  else={
-                    <Text style={{ color: C.muted }}>
-                      {question.running() ? tr('Generating answer…') : ''}
-                    </Text>
-                  }
-                >
-                  <TextView
-                    markdown={turn().answer}
-                    selectable
-                    options={{ preserveLineBreaks: true }}
-                  />
-                </If>
-              </View>
-            )}
-          </Each>
-          <If when={!!(question.error() || error())}>
-            <Text style={{ color: C.warning }}>{question.error() || error()}</Text>
-          </If>
-        </View>
-      </Scroll>
-      <View
-        style={{
-          flexDirection: 'row',
-          paddingHorizontal: 12,
-          height: 32,
-          gap: 12,
-          alignItems: 'center',
-          borderTopWidth: 1,
-          borderTopColor: C.line,
-        }}
-      >
-        <Button onPress={props.back}>
-          <Text style={{ color: C.secondary }}>{tr('Back')}</Text>
-        </Button>
-        <View style={{ flex: 1 }} />
-        <If
-          when={question.running()}
-          else={
-            <If when={!!question.turns().at(-1)?.answer}>
-              <Button
-                onPress={() => {
-                  void Clipboard.writeText(question.turns().at(-1)!.answer).catch((reason) =>
-                    error.set(String(reason)),
-                  );
+                  <Icon name="more" color={C.secondary} />
+                </Button>
+              }
+            >
+              <MenuItem
+                disabled={busy()}
+                style={menuRowStyle()}
+                hoverStyle={menuRowHoverStyle()}
+                onSelect={() => {
+                  menu.set(false);
+                  props.promote();
                 }}
               >
-                <Text style={{ color: C.secondary }}>{tr('Copy')}</Text>
-              </Button>
-            </If>
-          }
+                <Text style={{ color: C.text }}>{tr('Continue as a conversation')}</Text>
+              </MenuItem>
+              <MenuItem
+                disabled={busy()}
+                style={menuRowStyle()}
+                hoverStyle={menuRowHoverStyle()}
+                onSelect={() => {
+                  menu.set(false);
+                  props.back();
+                }}
+              >
+                <Text style={{ color: C.text }}>{tr('Back')}</Text>
+              </MenuItem>
+            </Menu>
+          </>
+        }
+      />
+      <View style={{ flexShrink: 1, minHeight: 0, borderTopWidth: 1, borderTopColor: C.line }}>
+        <List
+          ref={list}
+          each={rows()}
+          keyExtractor={(row) => row.key}
+          alignment="bottom"
+          estimatedItemSize={96}
+          maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 32 }}
+          style={{ height: listHeight(), flexShrink: 1, minHeight: 0 }}
+          contentStyle={{ paddingVertical: 16, paddingHorizontal: 16 }}
         >
-          <Button onPress={question.stop}>
-            <Text style={{ color: C.secondary }}>{tr('Stop generating')}</Text>
-          </Button>
+          {(row) => (
+            <View onLayout={({ bounds }) => transcriptSize.measure(row().key, bounds.size.height)}>
+              <MessageRow
+                item={row}
+                compactChat
+                localQuickReply
+                sessionId={question.thread()!.id}
+                through={() => 0}
+                previewImage={() => {}}
+                toolMaxHeight={() => 400}
+                userScroll={() => {}}
+                openLink={async (target) => {
+                  if (/^https?:\/\//i.test(target)) await openUrl(target);
+                }}
+              />
+            </View>
+          )}
+        </List>
+        <If when={question.running() && !question.thread()?.turns.at(-1)?.answer}>
+          <View style={{ paddingHorizontal: 16 }}>
+            <BotWorking detail={() => ''} />
+          </View>
+        </If>
+        <If when={!!question.error()}>
+          <Text style={{ paddingHorizontal: 16, paddingVertical: 8, color: C.warning }}>
+            {question.error()}
+          </Text>
         </If>
       </View>
     </View>
