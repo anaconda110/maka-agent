@@ -1,32 +1,53 @@
 name: Auto rust preview
 on:
   schedule:
-    # UTC 01:00 = 北京时间 09:00,每天自动同步上游并重建
-    - cron: '0 1 * * *'
+    # UTC 01:47 = 北京时间 09:47,每天自动同步上游并重建(避开整点调度高峰)
+    - cron: '47 1 * * *'
+    # UTC 12:23 = 北京时间 20:23,兜底 watchdog:上午那次被 GitHub 调度延迟/跳过时补跑
+    - cron: '23 12 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: '上游已同步时仍强制重建'
+        type: boolean
+        default: false
 permissions:
   contents: write
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      synced: ${{ steps.check.outputs.synced }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Check whether upstream rust-preview is already merged
+        id: check
+        run: |
+          git remote add upstream https://github.com/apache/maka.git
+          git fetch --no-tags upstream rust-preview
+          if git merge-base --is-ancestor upstream/rust-preview HEAD; then
+            echo "synced=true" >> "$GITHUB_OUTPUT"
+            echo "automation already contains upstream/rust-preview, nothing to sync"
+          else
+            echo "synced=false" >> "$GITHUB_OUTPUT"
+            echo "upstream/rust-preview has new commits, merging"
+          fi
       - name: Merge upstream rust-preview into automation
+        if: steps.check.outputs.synced == 'false' || inputs.force
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "maka-fork-automation"
           git config user.email "anaconda110@users.noreply.github.com"
-          git remote add upstream https://github.com/apache/maka.git
-          git fetch --no-tags upstream rust-preview
           git merge --no-edit upstream/rust-preview
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation
   trigger:
     needs: [sync]
+    if: needs.sync.outputs.synced == 'false' || inputs.force
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
