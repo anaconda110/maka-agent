@@ -83,6 +83,81 @@ impl Capture {
             previous: None,
         })
     }
+    pub(super) async fn quick_turns(
+        &mut self,
+        source: maka_agent_facts::import::Source,
+        turns: &[crate::contract::QuickTurn],
+    ) -> Result<ExactTranscript, Error> {
+        use maka_agent_facts::{
+            history_snapshot::{HistoricalRole, ImportedTurnOrdinal},
+            input::MessageInput,
+            model::{ModelPart, TextKind},
+        };
+        use maka_session_import::exact::ExactMessage;
+        let mut hash = Sha256::new();
+        let mut bytes = 0;
+        for (index, turn) in turns.iter().enumerate() {
+            let raw_record = serde_json::to_vec(turn)?;
+            hash.update(&raw_record);
+            bytes += raw_record.len() as u64;
+            let message = |role, part| ExactMessage {
+                reply_info: if role == HistoricalRole::Assistant {
+                    turn.reply_info.clone()
+                } else {
+                    None
+                },
+                source_message_id: None,
+                source_turn_id: None,
+                turn_ordinal: ImportedTurnOrdinal(index as u64),
+                timestamp: None,
+                role,
+                parts: vec![part],
+                provider_metadata: serde_json::Value::Null,
+            };
+            let mut messages = vec![message(
+                HistoricalRole::User,
+                ExactPart::Input {
+                    content: MessageInput {
+                        text: turn.question.clone(),
+                        preparation: vec![],
+                        display_text: None,
+                        attachments: None,
+                        quotes: None,
+                        directory_references: None,
+                        inline_references: None,
+                    },
+                    media: vec![],
+                },
+            )];
+            if !turn.answer.is_empty() {
+                messages.push(message(
+                    HistoricalRole::Assistant,
+                    ExactPart::Model {
+                        part: ModelPart::Text {
+                            text_kind: TextKind::Text,
+                            text: turn.answer.clone().into(),
+                            provider_options: None,
+                        },
+                    },
+                ));
+            }
+            self.record(ExactRecord {
+                raw_record,
+                messages,
+            })
+            .await?;
+        }
+        Ok(ExactTranscript {
+            source,
+            cwd: None,
+            title: turns[0].question.clone(),
+            fingerprint: maka_session_import::Fingerprint {
+                bytes,
+                sha256: hex::encode(hash.finalize()),
+                incomplete_tail: false,
+            },
+        })
+    }
     async fn content(&mut self, bytes: Vec<u8>) -> Result<ContentRef, Error> {
         let (bytes, digest) = tokio::task::spawn_blocking(move || {
             let digest = Sha256::digest(&bytes);
@@ -184,6 +259,7 @@ impl ExactSink for Capture {
                 let media = std::mem::take(&mut self.current_media);
                 let body = self
                     .json(ImportedMessage {
+                        reply_info: message.reply_info,
                         turn_ordinal: message.turn_ordinal,
                         original_ordinal,
                         media,

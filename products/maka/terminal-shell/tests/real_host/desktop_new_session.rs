@@ -1137,19 +1137,29 @@ async fn desktop_composer_previews_markdown_and_sends_its_source() {
     desktop.expect_text(source).await;
 
     desktop.press("Send message").await;
-    let request = desktop.request(&mut fixture).await;
+    let mut request = desktop.request(&mut fixture).await;
     let message = request.body["messages"].as_array().unwrap().last().unwrap();
     assert_eq!(message["role"], "user");
     assert_eq!(message["content"].as_str(), Some(source));
+    request.delta("Release notes received.").await;
     desktop
         .wait("the response did not finish", request.finish())
         .await;
+    desktop
+        .until("the response did not finish in the workbench", || {
+            desktop.controls("Stop response").is_empty().then_some(())
+        })
+        .await;
     let copy = desktop.control("Copy user message").await;
     desktop.artifact("composer-markdown-sent");
-    desktop.hover_at(copy.center());
-    desktop
+    // The actions are revealed by hovering over the message body above them.
+    desktop.hover_at(point(copy.center().x, copy.top() - px(12.)));
+    let copy = desktop
         .until("the copy action did not appear", || {
-            desktop.draws_in(copy).then_some(())
+            let &[copy] = desktop.controls("Copy user message").as_slice() else {
+                return None;
+            };
+            desktop.draws_in(copy).then_some(copy)
         })
         .await;
     desktop.press_at(copy.center());
@@ -1266,11 +1276,14 @@ async fn desktop_composer_references_a_conversation_without_waking_it() {
         .unwrap();
     assert_eq!(target["session"]["activity"], "idle");
     assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
+    let full_width_reply = desktop.control("Copy message").await;
     for from_reply in [false, true] {
         if from_reply {
-            // The Markdown link starts the line above the reply's actions.
-            let copy = desktop.control("Copy message").await;
-            desktop.press_at(point(copy.center().x + px(16.), copy.top() - px(16.)));
+            // Locate the Markdown link from the reply's actions after its layout is restored.
+            desktop.press_at(point(
+                full_width_reply.center().x + px(16.),
+                full_width_reply.top() - px(16.),
+            ));
         } else {
             desktop.press("@Release checklist").await;
         }
@@ -1306,7 +1319,16 @@ async fn desktop_composer_references_a_conversation_without_waking_it() {
             .await;
         assert_eq!(copied, history);
         desktop.press("Close side pane").await;
-        desktop.control("@Release checklist").await;
+        desktop
+            .until(
+                "closing the side pane did not restore the reply layout",
+                || {
+                    (desktop.controls("Close side pane").is_empty()
+                        && desktop.controls("Copy message").as_slice() == [full_width_reply])
+                    .then_some(())
+                },
+            )
+            .await;
     }
     assert_eq!(fixture.request_count.load(Ordering::SeqCst), 2);
     desktop.close().await;
@@ -1388,7 +1410,7 @@ async fn desktop_creates_only_on_first_submission_and_preserves_the_confirmed_sn
     desktop.new_draft().await;
     desktop.attach(&path).await;
     std::fs::write(&path, b"changed after selection").unwrap();
-    desktop.replace_text("FIRST_DESKTOP_MESSAGE").await;
+    desktop.type_text("FIRST_DESKTOP_MESSAGE").await;
     assert_eq!(desktop.sessions().await.len(), 1);
     gate.arm();
     desktop.press("Send message").await;
@@ -1716,14 +1738,30 @@ async fn desktop_recall_opens_passages_at_their_history_boundaries() {
     // Using the first result's fence for the second must fail the Host's exact row read.
     assert!(passages[1]["anchorPosition"]["sequence"].as_u64().unwrap() > fences[0]);
 
-    let desktop = Desktop::open(&fixture, &fixture.address).await;
+    let gate = ReplyGate::recall(fixture.directory.path(), fixture.address.clone());
+    let desktop = Desktop::open(&fixture, &gate.address).await;
     for (within, selected) in [(true, 0), (false, 1)] {
         let previous = desktop.platform.text_input_target();
         desktop.key("o", true);
         desktop.target_after(previous).await;
         desktop.paste("needle").await;
         if within {
+            let other = format!(
+                "Open matching passage in {}",
+                passages[1]["session"]["title"].as_str().unwrap()
+            );
+            desktop.control(&other).await;
+            desktop.artifact("recall-all-conversations");
+            gate.arm();
             desktop.press("This conversation").await;
+            desktop.held(&gate).await;
+            desktop
+                .until("a result outside the new scope remained visible", || {
+                    desktop.controls(&other).is_empty().then_some(())
+                })
+                .await;
+            desktop.artifact("recall-scope-change");
+            gate.release();
         }
         let title = passages[selected]["session"]["title"].as_str().unwrap();
         desktop
@@ -2004,6 +2042,14 @@ async fn desktop_message_actions_show_on_hover_or_focus_and_in_a_context_menu() 
         .wait("the reply did not finish", reply.finish())
         .await;
     let copy = desktop.control("Copy message").await;
+    desktop
+        .until("a direct reply kept an empty work header", || {
+            desktop
+                .controls("Turn work details")
+                .is_empty()
+                .then_some(())
+        })
+        .await;
     let composer = desktop.control("Focus message composer").await.center();
     // Inside the reply, above its row of actions.
     let body = point(copy.center().x + px(64.), copy.top() - px(16.));
@@ -2103,7 +2149,7 @@ async fn desktop_edits_a_message_in_place_and_forks_only_when_sent() {
     desktop.expect_text("ORIGINAL_EDIT_MESSAGE").await;
     desktop.artifact("message-editor");
     assert_eq!(desktop.sessions().await.len(), 2);
-    desktop.replace_text("EDITED_IN_PLACE_MESSAGE").await;
+    desktop.type_text("EDITED_IN_PLACE_MESSAGE").await;
     assert_eq!(desktop.sessions().await.len(), 2);
     desktop.press("Send edited message in a fork").await;
     let edited = desktop.request(&mut fixture).await;
@@ -2635,7 +2681,7 @@ async fn desktop_side_pane_keeps_its_draft_separate_when_closed_and_reopened() {
         nsh_core::platform::Appearance::Dark,
     )
     .await;
-    desktop.replace_text("MAIN_DRAFT").await;
+    desktop.type_text("MAIN_DRAFT").await;
     let roots = desktop
         .client
         .query("agent", "directories", json!({"kind":"roots"}))
@@ -2650,11 +2696,19 @@ async fn desktop_side_pane_keeps_its_draft_separate_when_closed_and_reopened() {
         }),
     )
     .await;
+    let more = desktop.control("Actions for Side conversation").await;
+    let title = desktop.control("Open conversation Side conversation").await;
+    assert!(
+        more.size.width <= px(32.)
+            && more.size.height == title.size.height
+            && title.size.width > more.size.width,
+        "the More menu should fill the trailing icon slot without collapsing vertically: {title:?}, {more:?}"
+    );
     let original = desktop.platform.text_input_target();
     desktop.press("Actions for Side conversation").await;
     desktop.press("Open to the side").await;
     desktop.target_after(original).await;
-    desktop.replace_text("SIDE_DRAFT").await;
+    desktop.type_text("SIDE_DRAFT").await;
     desktop.press("Close side pane").await;
     desktop.press("Focus message composer").await;
     desktop.expect_text("MAIN_DRAFT").await;
@@ -3764,6 +3818,38 @@ async fn desktop_mermaid_renders_markdown_and_toggles_its_source() {
     desktop.press("Hide diagram source").await;
     desktop.control("Show diagram source").await;
     assert!(desktop.controls("Copy code block").is_empty());
+    desktop.press("Open diagram full screen").await;
+    desktop.control("Close full screen image").await;
+    desktop.press("Zoom image in").await;
+    desktop.press("Zoom image in").await;
+    desktop
+        .until(
+            "the enlarged diagram never painted in the full-screen viewer",
+            || {
+                let guard = desktop.frame.lock().unwrap();
+                let frame = guard.as_ref()?;
+                let filled = frame
+                    .pixels()
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|pixel| pixel[..3] == [0x1d, 0x74, 0x5a])
+                    .count();
+                (filled > 1000).then_some(())
+            },
+        )
+        .await;
+    desktop.artifact(&format!("mermaid-workbench-viewer-{theme}-{layout}"));
+    desktop.press("Zoom image out").await;
+    desktop.press("Close full screen image").await;
+    desktop
+        .until("the diagram viewer did not close", || {
+            desktop
+                .controls("Close full screen image")
+                .is_empty()
+                .then_some(())
+        })
+        .await;
     desktop.close().await;
     fixture.finish().await;
 }
@@ -3867,11 +3953,12 @@ async fn desktop_goal_commands_create_pause_resume_and_finish_without_losing_the
     desktop.press("Pause Goal").await;
     // A paused Goal can still be cancelling its iteration.
     desktop.control("Complete Goal").await;
+    // The cancelled HTTP request may never have had a response stream to close.
+    drop(first);
     desktop.press("Resume Goal").await;
     desktop.control("Pause Goal").await;
     let running = desktop.request(&mut fixture).await;
-    desktop.press("Change budget").await;
-    desktop.control("Cancel editing").await;
+    desktop.press_until("Change budget", "Cancel editing").await;
     assert!(
         running.body["tools"]
             .as_array()
@@ -3988,7 +4075,6 @@ async fn desktop_goal_commands_create_pause_resume_and_finish_without_losing_the
         })
         .await;
     assert!(desktop.controls("Dismiss Goal").is_empty());
-    first.finish_stream().await;
     desktop.close().await;
     fixture.finish().await;
 }
@@ -4292,6 +4378,148 @@ async fn desktop_system_permission_guidance_uses_native_actions_without_paths() 
     desktop
         .control("Request cancelled without granting access")
         .await;
+    desktop.close().await;
+    fixture.finish().await;
+}
+
+async fn desktop_sidebar_customizes_features_switches_order_and_expands_full_width() {
+    let fixture = Fixture::configured(Options::default()).await;
+    let workspace_dir = fixture.directory.path().join("workspace").join("maka");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_path = std::fs::canonicalize(&workspace_dir)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let client = fixture.client().await;
+    let registered = mutate(
+        &client,
+        "project",
+        json!({
+            "kind": "register",
+            "path": workspace_path,
+            "expected": null,
+        }),
+    )
+    .await;
+    assert_eq!(registered["kind"], "committed", "{registered}");
+    let project_id = registered["project"]["reference"]["id"]
+        .as_str()
+        .expect("registered project id")
+        .to_owned();
+    let project_name = registered["project"]["name"]
+        .as_str()
+        .expect("registered project name")
+        .to_owned();
+    let backend = json!({
+        "kind": "model",
+        "connectionId": fixture.selection["connectionId"],
+        "modelId": fixture.selection["modelId"],
+    });
+    for index in 1..=8 {
+        let created = mutate(
+            &client,
+            "create",
+            json!({
+                "title": format!("Sidebar task {index}"),
+                "labels": [],
+                "workspace": {
+                    "kind": "project",
+                    "projectId": project_id,
+                    "path": workspace_path,
+                },
+                "backend": backend,
+            }),
+        )
+        .await;
+        assert_eq!(created["kind"], "created", "{created}");
+    }
+    client.close().await.unwrap();
+
+    let desktop = Desktop::open_at(
+        &fixture,
+        &fixture.address,
+        size(
+            nsh_terminal::DevicePixels(1120),
+            nsh_terminal::DevicePixels(860),
+        ),
+        nsh_core::platform::Appearance::Dark,
+    )
+    .await;
+
+    let show_more_label = format!("Show more conversations in {project_name}");
+    let show_fewer_label = format!("Show fewer conversations in {project_name}");
+    let sample_row = desktop.control("Open conversation Sidebar task 8").await;
+    let show_more = desktop.control(&show_more_label).await;
+    assert!(
+        desktop.controls("Waiting for you").is_empty(),
+        "Waiting for you should no longer appear in the sidebar navigation"
+    );
+    assert!(
+        desktop.controls("Rooms").is_empty(),
+        "Rooms should start unpinned behind More features"
+    );
+    assert!(
+        (show_more.left() - sample_row.left()).abs() <= px(1.0)
+            && show_more.size.width >= sample_row.size.width,
+        "Show more button should span the full sidebar row width: show_more={show_more:?}, row={sample_row:?}"
+    );
+    desktop.artifact("sidebar-after-project");
+
+    desktop.press(&show_more_label).await;
+    desktop.control("Open conversation Sidebar task 1").await;
+    desktop.control(&show_fewer_label).await;
+
+    desktop.press("More features").await;
+    desktop.control("Show Rooms in sidebar").await;
+    desktop.artifact("sidebar-after-more-features");
+    desktop.press("Show Rooms in sidebar").await;
+    desktop.key("escape", false);
+    desktop
+        .until("closing More features did not leave Rooms pinned", || {
+            // The open popover has its own Rooms button over the sidebar.
+            (desktop.controls("Show Rooms in sidebar").is_empty()
+                && desktop.controls("Rooms").len() == 1)
+                .then_some(())
+        })
+        .await;
+
+    desktop.press("Sort by time").await;
+    desktop.control("Group by project").await;
+    assert!(
+        desktop.controls(&show_fewer_label).is_empty(),
+        "chronological mode should not render project show-more rows"
+    );
+    assert!(
+        desktop
+            .controls(&format!("Collapse {project_name}"))
+            .is_empty(),
+        "chronological mode should hide project group headings"
+    );
+    desktop.artifact("sidebar-after-time");
+
+    desktop.press("Group by project").await;
+    desktop.control(&format!("Collapse {project_name}")).await;
+    desktop.control("Sort by time").await;
+
+    desktop.press("Collapse session browser").await;
+    let expand = desktop.control("Expand session browser").await;
+    let composer = desktop.control("Focus message composer").await;
+    desktop.hover_at(expand.center());
+    desktop.hover_at(composer.center());
+    desktop.hover_at(expand.center());
+    desktop.press("More features").await;
+    let rooms_switch = desktop.control("Show Rooms in sidebar").await;
+    desktop.hover_at(rooms_switch.center());
+    tokio::time::sleep(Duration::from_millis(260)).await;
+    desktop.press("Show Rooms in sidebar").await;
+    desktop.key("escape", false);
+    desktop
+        .until(
+            "unpinning Rooms did not remove it from the sidebar navigation",
+            || desktop.controls("Rooms").is_empty().then_some(()),
+        )
+        .await;
+
     desktop.close().await;
     fixture.finish().await;
 }
@@ -4623,12 +4851,11 @@ async fn desktop_workspace_stage_inspector_worktrees_and_fullscreen_review() {
         .wait("the model response did not finish", reply.finish())
         .await;
 
-    // 1. Verify Composer holds [Browse workspace files] on the same toolbar row as [Add to message]
     let ws_btn = desktop.control("Browse workspace files").await;
     let add_btn = desktop.control("Add to message").await;
     assert!(
-        (ws_btn.center().y - add_btn.center().y).abs() <= px(2.0),
-        "Browse workspace files must sit in Composer toolbar beside Add to message: ws={ws_btn:?}, add={add_btn:?}"
+        ws_btn.center().y < add_btn.top(),
+        "Browse workspace files must sit in Conversation header above Composer: ws={ws_btn:?}, add={add_btn:?}"
     );
     let composer_before = desktop.control("Focus message composer").await;
     assert!(
@@ -4662,14 +4889,16 @@ async fn desktop_workspace_stage_inspector_worktrees_and_fullscreen_review() {
     let trajectory_tab = desktop.control("Trajectory").await;
     let stage_toggle = desktop.control("Toggle workspace pane").await;
     assert!(
-        inspector_toggle.right() <= chat_tab.left() + px(1.0)
+        ws_btn.right() <= inspector_toggle.left() + px(1.0)
+            && inspector_toggle.right() <= chat_tab.left() + px(1.0)
             && stage_toggle.left() >= trajectory_tab.right() - px(1.0),
-        "Header controls out of order: inspector={inspector_toggle:?}, chat={chat_tab:?}, trajectory={trajectory_tab:?}, stage={stage_toggle:?}"
+        "Header controls out of order: ws={ws_btn:?}, inspector={inspector_toggle:?}, chat={chat_tab:?}, trajectory={trajectory_tab:?}, stage={stage_toggle:?}"
     );
     assert!(
-        (inspector_toggle.center().y - chat_tab.center().y).abs() <= px(2.0)
+        (ws_btn.center().y - chat_tab.center().y).abs() <= px(2.0)
+            && (inspector_toggle.center().y - chat_tab.center().y).abs() <= px(2.0)
             && (stage_toggle.center().y - chat_tab.center().y).abs() <= px(2.0),
-        "Header controls misaligned vertically: inspector={inspector_toggle:?}, chat={chat_tab:?}, stage={stage_toggle:?}"
+        "Header controls misaligned vertically: ws={ws_btn:?}, inspector={inspector_toggle:?}, chat={chat_tab:?}, stage={stage_toggle:?}"
     );
 
     // 2. Open Session Context Inspector with 12 subagents & 15 worktrees:
@@ -4896,6 +5125,7 @@ pub(crate) const CASES: &[&str] = &[
     "desktop_todo_strip_keeps_its_row_in_place_and_closes_until_the_list_changes",
     "desktop_composer_large_paste_keeps_controls_on_screen",
     "desktop_system_permission_guidance_uses_native_actions_without_paths",
+    "desktop_sidebar_customizes_features_switches_order_and_expands_full_width",
     "desktop_composer_toolbar_customizes_layout_and_context_usage",
     "desktop_composer_sandbox_choice_becomes_the_default",
     "desktop_workspace_stage_inspector_worktrees_and_fullscreen_review",
@@ -5023,6 +5253,8 @@ pub(crate) fn run(name: &str) {
         "desktop_system_permission_guidance_uses_native_actions_without_paths" => {
             runtime.block_on(desktop_system_permission_guidance_uses_native_actions_without_paths())
         }
+        "desktop_sidebar_customizes_features_switches_order_and_expands_full_width" => runtime
+            .block_on(desktop_sidebar_customizes_features_switches_order_and_expands_full_width()),
         "desktop_composer_toolbar_customizes_layout_and_context_usage" => {
             runtime.block_on(desktop_composer_toolbar_customizes_layout_and_context_usage())
         }

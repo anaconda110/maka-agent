@@ -198,14 +198,6 @@ export const toolbarControlStyle = {
   ...controlStyle,
   paddingHorizontal: platform.idiom === 'terminal' ? 12 : 8,
 } as const;
-export const sidebarDisclosureStyle = {
-  alignSelf: 'flex-start',
-  flexDirection: 'row',
-  alignItems: 'center',
-  paddingHorizontal: 8,
-  paddingVertical: 4,
-  borderRadius: 8,
-} as const;
 /**
  * Horizontal padding of the disclosure rows in a turn (status, process group,
  * thinking, tool). The desktop gives them one value so their chevrons and
@@ -288,6 +280,7 @@ export const menuSeparatorStyle = () => ({
 export const quietActiveStyle = () => ({ backgroundColor: C.cardRaised });
 
 export function IconButton(props: {
+  compact?: boolean;
   label: string;
   tooltip?: string;
   icon: Parameters<typeof Icon>[0]['name'];
@@ -304,8 +297,10 @@ export function IconButton(props: {
       onPress={props.onPress}
       style={{
         ...controlStyle,
-        width: 32,
-        paddingHorizontal: 8,
+        width: props.compact ? 24 : 32,
+        minHeight: props.compact ? 24 : 32,
+        paddingVertical: props.compact ? 4 : 8,
+        paddingHorizontal: props.compact ? 4 : 8,
         alignItems: 'center',
         flexShrink: 0,
       }}
@@ -354,6 +349,7 @@ export function Disclosure(props: {
   tooltip?: string;
   open: boolean;
   foldable?: boolean;
+  reserveChevron?: boolean;
   /** On the desktop, what the row is, in place of the chevron. */
   icon?: Parameters<typeof Icon>[0]['name'];
   terminalInset?: number;
@@ -398,8 +394,8 @@ export function Disclosure(props: {
             <If
               when={props.foldable !== false}
               else={
-                // The label stays on the text lane where there is nothing to fold.
-                <If when={platform.idiom !== 'terminal'}>
+                // Nested rows can align their labels with foldable siblings.
+                <If when={platform.idiom !== 'terminal' && props.reserveChevron !== false}>
                   <View style={{ width: 16, height: 16 }} />
                 </If>
               }
@@ -544,6 +540,7 @@ export function ViewSegment(props: { label: string; selected: boolean; onPress: 
  */
 export function Header(props: {
   title: string;
+  subtitle?: string;
   workspace?: string;
   /** The command palette, which the terminal's header opens; the desktop's is in the menu bar. */
   commands(): void;
@@ -633,7 +630,23 @@ export function Header(props: {
       >
         {props.title}
       </Text>
-      <If when={!desktop && props.files}>
+      <If when={Boolean(props.subtitle)}>
+        <Text
+          style={[
+            {
+              ...captionTextStyle,
+              color: C.muted,
+              flexShrink: 2,
+              minWidth: 0,
+              marginLeft: 6,
+            },
+            { numberOfLines: 1, textOverflow: 'ellipsis' },
+          ]}
+        >
+          {props.subtitle}
+        </Text>
+      </If>
+      <If when={props.files && (!desktop || Boolean(props.workspace))}>
         <Button
           accessibilityLabel={tr('Browse workspace files')}
           tooltip={textTooltip(() => props.workspace || tr('Browse workspace files'))}
@@ -641,22 +654,25 @@ export function Header(props: {
           onPress={props.files}
           style={{
             ...toolbarControlStyle,
+            ...(desktop ? { minHeight: 28, height: 28, paddingVertical: 0 } : {}),
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 8,
-            maxWidth: 240,
-            minWidth: 0,
-            flexShrink: 1,
+            gap: desktop ? 4 : 8,
+            maxWidth: desktop ? 180 : 240,
+            minWidth: desktop ? 30 : 0,
+            ...(desktop ? { overflow: 'hidden' as const } : {}),
+            flexShrink: desktop ? 2 : 1,
           }}
-          hoverStyle={{ backgroundColor: C.surface }}
-          focusStyle={{ backgroundColor: C.raised }}
+          hoverStyle={desktop ? quietHoverStyle() : { backgroundColor: C.surface }}
+          activeStyle={desktop ? quietActiveStyle() : undefined}
+          focusStyle={desktop ? quietFocusStyle() : { backgroundColor: C.raised }}
         >
-          <Icon name="folder" color={C.secondary} size={16} />
+          <Icon name="folder" color={desktop ? C.muted : C.secondary} size={desktop ? 14 : 16} />
           <Text
             style={[
               {
                 ...captionTextStyle,
-                color: C.secondary,
+                color: desktop ? C.muted : C.secondary,
                 minWidth: 0,
                 flexShrink: 1,
               },

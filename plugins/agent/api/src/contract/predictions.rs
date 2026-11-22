@@ -52,4 +52,16 @@ pub struct QuickQuestion {
     pub question: String,
     pub request_id: String,
     pub continue_from: Option<String>,
+    #[serde(default)]
+    #[schemars(length(max = 32))]
+    pub history: Vec<QuickTurn>,
+}
+
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QuickTurn {
+    pub question: String,
+    pub answer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_info: Option<maka_agent_facts::model::QuickReplyInfo>,
 }

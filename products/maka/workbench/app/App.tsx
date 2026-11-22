@@ -31,7 +31,7 @@ import {
   type Signal,
 } from 'nsh';
 import { host as nativeHost } from 'maka/host';
-import { Button, Collapsible } from 'nsh/base';
+import { Button } from 'nsh/base';
 import type { UiModule, UiRootProps } from '../../../../packages/plugin-sdk/src/workbench.js';
 import type {
   ModelSelection,
@@ -52,6 +52,7 @@ import {
 } from '../../../../packages/plugin-sdk/src/workbench-views.js';
 import { currentWindow } from 'nsh/desktop';
 import { QuickLauncher } from './QuickLauncher';
+import { UpdateBanner } from './UpdateBanner';
 import { createQuickTools, QuickToolsSettings, type QuickTools } from './QuickTools';
 import { ownTitleBar, windowTitle } from './chrome';
 import {
@@ -65,15 +66,7 @@ import {
 import { createWorkbenchPlugins, type PanelRoute } from './plugins/context';
 import { PluginPanel } from './plugins/PluginPanel';
 import { currentLocale, tr } from './locale';
-import {
-  bodyTextStyle,
-  C,
-  controlStyle,
-  controlHoverStyle,
-  controlFocusStyle,
-  sidebarDisclosureStyle,
-} from './ui';
-import { Icon } from './Icon';
+import { bodyTextStyle, C, controlStyle, controlHoverStyle, controlFocusStyle } from './ui';
 
 type Configuration = {
   navigation: UiTarget;
@@ -110,7 +103,6 @@ function App(
   const selected = signal(saved === null ? nativeHost.initialSession : saved.sessionId);
   const sidebarExpanded = signal(saved?.sidebarExpanded ?? true);
   const workspaceMode = signal<'conversations' | 'rooms'>(saved?.workspaceMode ?? 'conversations');
-  const moreNavigation = signal(false);
   const roomWorkspace = signal<RoomWorkspaceHandle | null>(null);
   const settingsOpened = signal(saved?.settings !== null && saved?.settings !== undefined);
   const settingsModel = signal<ModelSelection | undefined>(saved?.settings?.model);
@@ -321,7 +313,8 @@ function App(
     sidebarShown: sidebarExpanded,
     sidebarHover: (inside) => sidebarHover.hover(inside),
     sidebarDocked: () => canDockBrowser(previewShown()),
-    previewDocked: () => previewShown() && canDockPreview(),
+    previewDocked: () =>
+      (previewShown() && canDockPreview()) || Math.min(sideRoom(), sides().length) > 0,
     showSidebar() {
       if (!blocked()) sidebarExpanded.set(true);
     },
@@ -395,24 +388,7 @@ function App(
       </Each>
     </View>
   );
-  const navigationMore = () => (
-    <Collapsible open={moreNavigation()} reveal content={modeSwitch()}>
-      <View
-        role="button"
-        accessibilityLabel={moreNavigation() ? tr('Less navigation') : tr('More navigation')}
-        accessibilityState={{ expanded: moreNavigation() }}
-        onPress={() => moreNavigation.set(!moreNavigation())}
-        style={{ ...sidebarDisclosureStyle, gap: 6 }}
-        hoverStyle={controlHoverStyle()}
-        focusStyle={controlFocusStyle()}
-      >
-        <Text style={{ color: C.muted, fontSize: 12 }}>
-          {moreNavigation() ? tr('Less navigation') : tr('More navigation')}
-        </Text>
-        <Icon name={moreNavigation() ? 'up' : 'down'} size={12} color={C.muted} />
-      </View>
-    </Collapsible>
-  );
+
   function openBeside(id: string) {
     if (!alive || blocked() || id === selected() || sideFor(id)) return;
     if (assistant()?.id() === id) {
@@ -438,7 +414,13 @@ function App(
       openSettings: shell.openSettings,
       sidebarShown: () => true,
       sidebarDocked: () => true,
-      previewDocked: () => false,
+      previewDocked: () => {
+        const index = sides().indexOf(pane);
+        return (
+          (previewShown() && canDockPreview()) ||
+          (index >= 0 && index + 1 < Math.min(sideRoom(), sides().length))
+        );
+      },
       showSidebar() {},
       hideSidebar() {},
       dismissRoute: shell.dismissRoute,
@@ -452,6 +434,7 @@ function App(
       ...sideShell(pane),
       visible: () => true,
       paneVisible: () => true,
+      previewDocked: () => false,
       async openSession(id) {
         if (id === pane.id()) return true;
         if (!(await closeLauncher())) return false;
@@ -514,6 +497,10 @@ function App(
       <If when={ownTitleBar}>
         <QuickLauncher
           quick={props.quick}
+          currentSession={selected}
+          showQuestion={async (id) => {
+            if (await closeLauncher()) await showSession(id);
+          }}
           openBot={openBot}
           vacate={vacate}
           open={openAssistant}
@@ -541,8 +528,9 @@ function App(
           navigation={(temporary) =>
             runtime.renderView(configuration.navigation, conversationNavigationView, {
               shell,
-              navigationMore,
+              openRooms: () => void switchWorkspace('rooms'),
               suppressSidebarHover: sidebarHover.suppressUntilExit,
+              holdSidebarHover: temporary ? sidebarHover.hold : undefined,
               pinSidebar: temporary ? shell.showSidebar : undefined,
             })
           }
@@ -588,6 +576,7 @@ function App(
           },
         })}
       </WorkspaceSurface>
+      <UpdateBanner />
       <If when={runtime.updateError() !== null}>
         <View
           style={{
