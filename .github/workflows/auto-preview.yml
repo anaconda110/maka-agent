@@ -24,26 +24,32 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Check whether upstream rust-preview is already merged
+      - name: Check whether upstream main is already merged
         id: check
         run: |
           git remote add upstream https://github.com/apache/maka.git
-          git fetch --no-tags upstream rust-preview
-          if git merge-base --is-ancestor upstream/rust-preview HEAD; then
+          git fetch --no-tags upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
             echo "synced=true" >> "$GITHUB_OUTPUT"
-            echo "automation already contains upstream/rust-preview, nothing to sync"
+            echo "automation already contains upstream/main, nothing to sync"
           else
             echo "synced=false" >> "$GITHUB_OUTPUT"
-            echo "upstream/rust-preview has new commits, merging"
+            echo "upstream/main has new commits, merging"
           fi
-      - name: Merge upstream rust-preview into automation
+      - name: Merge upstream main into automation
         if: steps.check.outputs.synced == 'false' || inputs.force
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "maka-fork-automation"
           git config user.email "anaconda110@users.noreply.github.com"
-          git merge --no-edit upstream/rust-preview
+          if git merge --no-edit upstream/main; then
+            echo "merge clean"
+          else
+            echo "::error::Merge conflict with upstream main"
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation
   trigger:
     needs: [sync]
