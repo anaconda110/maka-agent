@@ -43,12 +43,26 @@ jobs:
         run: |
           git config user.name "maka-fork-automation"
           git config user.email "anaconda110@users.noreply.github.com"
+          PRE=$(git rev-parse HEAD)
           if git merge --no-edit upstream/main; then
             echo "merge clean"
           else
             echo "::error::Merge conflict with upstream main"
             git diff --name-only --diff-filter=U
             exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" = "$PRE" ]; then
+            echo "nothing to merge"
+          else
+            # GITHUB_TOKEN may not create or update .github/workflows files, so keep the
+            # fork's workflow copies instead of upstream's. Our builds use fork-owned
+            # workflows; upstream CI workflows are irrelevant here.
+            git rm -r -q --cached .github/workflows
+            rm -rf .github/workflows
+            git checkout "$PRE" -- .github/workflows
+            if ! git diff --cached --quiet; then
+              git commit --amend --no-edit --quiet
+            fi
           fi
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation
   trigger:
