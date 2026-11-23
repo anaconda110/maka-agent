@@ -26,7 +26,12 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { buildCli, rustTarget, stageDesktopBundle } from './build-cli.mjs';
+import {
+  buildCli,
+  linuxSystemLibraryRustflags,
+  rustTarget,
+  stageDesktopBundle,
+} from './build-cli.mjs';
 
 const manifest = [
   '[workspace]',
@@ -284,6 +289,30 @@ test('CLI builds use the requested target and artifact path', async (t) => {
   );
   assert.equal(invocation.options.cwd, sourceRoot);
   assert.equal(invocation.options.env, sourceEnv);
+  await mkdir(join(sourceRoot, 'target/aarch64-apple-darwin/dist'), { recursive: true });
+  await writeFile(
+    join(sourceRoot, 'target/aarch64-apple-darwin/dist/maka-desktop-shell'),
+    'shell bytes',
+  );
+  await writeFile(
+    join(sourceRoot, 'target/aarch64-apple-darwin/dist/maka-host-shell'),
+    'host shell bytes',
+  );
+  executable = join(sourceRoot, 'target/aarch64-apple-darwin/dist/maka');
+  assert.equal(
+    (
+      await buildCli({
+        profile: 'dist',
+        target: 'aarch64-apple-darwin',
+        repositoryRoot: sourceRoot,
+        env: sourceEnv,
+      })
+    ).binary,
+    join(sourceRoot, 'target/aarch64-apple-darwin/dist/maka'),
+  );
+  assert.ok(invocation.args.includes('--profile'));
+  assert.equal(invocation.args[invocation.args.indexOf('--profile') + 1], 'dist');
+  assert.ok(!invocation.args.includes('--release'));
   exitCode = 1;
   await assert.rejects(buildCli({ release: true, repositoryRoot: root }), /Maka build failed: 1/u);
 });
@@ -383,4 +412,40 @@ test('the Host app has a valid stable bundle signature', {
     first,
     'an unrelated product version must not change the Host privacy identity',
   );
+});
+
+test('linuxSystemLibraryRustflags exposes host system library dirs for zigbuild', () => {
+  const shlib = '-C link-arg=-Wl,--allow-shlib-undefined';
+  const ubuntuX64 = (dir) => dir === '/usr/lib/x86_64-linux-gnu' || dir === '/usr/lib';
+  assert.deepEqual(linuxSystemLibraryRustflags('x86_64-unknown-linux-gnu', {}, ubuntuX64), {
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: `-L native=/usr/lib/x86_64-linux-gnu -L native=/usr/lib ${shlib}`,
+  });
+  assert.deepEqual(
+    linuxSystemLibraryRustflags(
+      'x86_64-unknown-linux-gnu',
+      { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: '-C link-arg=-s -L native=/usr/lib' },
+      ubuntuX64,
+    ),
+    {
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: `-C link-arg=-s -L native=/usr/lib -L native=/usr/lib/x86_64-linux-gnu ${shlib}`,
+    },
+  );
+  assert.deepEqual(
+    linuxSystemLibraryRustflags(
+      'x86_64-unknown-linux-gnu',
+      { CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: '-L native=/usr/lib/x86_64-linux-gnu' },
+      ubuntuX64,
+    ),
+    {
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: `-L native=/usr/lib/x86_64-linux-gnu -L native=/usr/lib ${shlib}`,
+    },
+  );
+  const ubuntuArm64 = (dir) => dir === '/usr/lib/aarch64-linux-gnu' || dir === '/usr/lib';
+  assert.deepEqual(linuxSystemLibraryRustflags('aarch64-unknown-linux-gnu', {}, ubuntuArm64), {
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: `-L native=/usr/lib/aarch64-linux-gnu -L native=/usr/lib ${shlib}`,
+  });
+  const fedora = (dir) => dir === '/usr/lib64' || dir === '/usr/lib';
+  assert.deepEqual(linuxSystemLibraryRustflags('x86_64-unknown-linux-gnu', {}, fedora), {
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: `-L native=/usr/lib64 -L native=/usr/lib ${shlib}`,
+  });
 });

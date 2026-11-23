@@ -18,7 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { release as osRelease } from 'node:os';
 import { parseArgs } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -57,19 +57,51 @@ function developmentFeatures(env, platform, release) {
   return bridge ? ['--no-default-features'] : [];
 }
 
+const linuxMultiarchDirs = {
+  'x86_64-unknown-linux-gnu': '/usr/lib/x86_64-linux-gnu',
+  'aarch64-unknown-linux-gnu': '/usr/lib/aarch64-linux-gnu',
+};
+
+// Zig treats glibc-versioned targets as cross-compilation and excludes host system
+// library directories; pass native dirs so GTK/X11/Vulkan link while Zig keeps its
+// bundled glibc 2.28 stubs for libc. Host .so files (e.g. Ubuntu's libvulkan.so)
+// internally reference newer host glibc symbols, so allow undefined symbols inside
+// external shared libraries while still requiring our own binary to satisfy 2.28.
+export function linuxSystemLibraryRustflags(triple, env = {}, exists = existsSync) {
+  const multiarch = linuxMultiarchDirs[triple];
+  const candidates =
+    multiarch && exists(multiarch) ? [multiarch, '/usr/lib'] : ['/usr/lib64', '/usr/lib'];
+  const dirs = candidates.filter((dir) => exists(dir));
+  if (!dirs.length) return {};
+  const key = `CARGO_TARGET_${triple.toUpperCase().replace(/-/g, '_')}_RUSTFLAGS`;
+  const existing = env[key]?.trim() ?? '';
+  const hasFlag = (flag) =>
+    new RegExp(`(?:^|\\s)${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(existing);
+  const desired = [
+    ...dirs.map((dir) => `-L native=${dir}`),
+    '-C link-arg=-Wl,--allow-shlib-undefined',
+  ];
+  const added = desired.filter((flag) => !hasFlag(flag));
+  if (!added.length) return {};
+  return { [key]: existing ? `${existing} ${added.join(' ')}` : added.join(' ') };
+}
+
 export async function compileCli({
   release = false,
+  profile,
   target,
   timings = false,
   desktop = true,
   repositoryRoot = root,
   env = process.env,
   platform = process.platform,
+  arch = process.arch,
   osRelease: releaseName = osRelease(),
 } = {}) {
-  const host = rustTarget(platform);
+  const host = rustTarget(platform, arch);
   const triple = target ?? host;
-  const linuxRelease = release && target !== undefined && triple.includes('-linux-');
+  const isRelease = release || (profile !== undefined && profile !== 'dev');
+  const linuxRelease = isRelease && target !== undefined && triple.includes('-linux-');
   if (linuxRelease && !/^(x86_64|aarch64)-unknown-linux-gnu$/u.test(triple)) {
     throw new Error('Linux releases require an x86_64 or aarch64 GNU target');
   }
@@ -86,8 +118,9 @@ export async function compileCli({
     '-p',
     'maka-python-runtime',
   ];
-  if (!release && triple === host) args.push(...developmentFeatures(env, platform, releaseName));
-  if (release) args.push('--release');
+  if (!isRelease && triple === host) args.push(...developmentFeatures(env, platform, releaseName));
+  if (profile) args.push('--profile', profile);
+  else if (release) args.push('--release');
   if (timings) args.push('--timings');
   if (outputTarget) args.push('--target', linuxRelease ? `${triple}.2.28` : outputTarget);
   // cargo-config2 in zigbuild misreads Cargo's empty wrapper configuration as a program.
@@ -96,6 +129,7 @@ export async function compileCli({
         ...env,
         RUSTC_WRAPPER: env.RUSTC_WRAPPER ?? '',
         RUSTC_WORKSPACE_WRAPPER: env.RUSTC_WORKSPACE_WRAPPER ?? '',
+        ...(triple === host ? linuxSystemLibraryRustflags(triple, env) : {}),
       }
     : env;
   const result = await cargoBuild(args, { cwd: repositoryRoot, env: buildEnv });
@@ -384,6 +418,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const { values } = parseArgs({
     options: {
       release: { type: 'boolean' },
+      profile: { type: 'string' },
       target: { type: 'string' },
       timings: { type: 'boolean' },
     },

@@ -17,28 +17,8 @@
  * under the License.
  */
 
-import { mount, View } from 'nsh';
-import { MarkdownBody } from '../../../workbench/app/MarkdownBody';
-import type { Row } from '../../../workbench/app/history';
-import { C } from '../../../workbench/app/ui';
-
-const row: Row = {
-  key: 'mermaid',
-  messageId: 'mermaid',
-  field: 'body',
-  role: 'assistant',
-  prefix: true,
-  text: '### Mermaid diagrams in Maka\n\n```mermaid\nflowchart LR\n  A[源码] --> B[图表]\n  style B fill:#1d745a,stroke:#24c483,color:#ffffff\n```\n',
-};
-
-mount(() => (
-  <View style={{ flex: 1, padding: 32, backgroundColor: C.background }}>
-    <MarkdownBody
-      row={() => row}
-      sourceId="mermaid-preview"
-      sessionId="mermaid-preview"
-      openLink={async () => {}}
-      userScroll={() => {}}
-    />
-  </View>
-));
+fn main() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rustc-link-arg-bin=maka-host-shell=-Wl,-no_exported_symbols");
+    }
+}
